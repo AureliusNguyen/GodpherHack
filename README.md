@@ -6,26 +6,6 @@ CLI Agent for CTF solving
 
 ```bash
 npm install
-npm run build
-```
-
-## Run
-
-```bash
-# Run directly
-node dist/cli.js
-
-# Or link globally, then use from anywhere
-npm link
-godpherhack
-```
-
-## Commands
-
-```bash
-godpherhack          # Launch interactive CLI
-godpherhack -V       # Print version
-godpherhack --help   # Show help
 ```
 
 ## Scripts
@@ -36,10 +16,17 @@ godpherhack --help   # Show help
 ./test.sh            # Run tests
 ```
 
-## Development
+## Commands
 
 ```bash
-npm run dev          # Watch mode (rebuild on changes)
-npm test             # Run tests
-npm run lint         # Type-check
+godpherhack          # Launch interactive CLI
+godpherhack -V       # Print version
+godpherhack --help   # Show help
+```
+
+To use the `godpherhack` command globally:
+
+```bash
+npm run build
+npm link
 ```
