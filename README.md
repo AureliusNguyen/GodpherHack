@@ -28,6 +28,14 @@ godpherhack -V       # Print version
 godpherhack --help   # Show help
 ```
 
+## Scripts
+
+```bash
+./build.sh           # Build the project
+./run.sh             # Build + launch the CLI
+./test.sh            # Run tests
+```
+
 ## Development
 
 ```bash
