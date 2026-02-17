@@ -176,6 +176,7 @@ function App() {
   const [activeChoice, setActiveChoice] = useState<ActiveChoice | null>(null);
   const [cursor, setCursor] = useState(0);
   const [turn, setTurn] = useState(0);
+  const [ctrlCPressed, setCtrlCPressed] = useState(false);
 
   const pushMessages = (...msgs: ChatMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
@@ -195,11 +196,19 @@ function App() {
   };
 
   useInput((ch, key) => {
-    // Always allow Ctrl+C to exit
+    // Double Ctrl+C to exit
     if (key.ctrl && ch === "c") {
-      exit();
+      if (ctrlCPressed) {
+        exit();
+      } else {
+        setCtrlCPressed(true);
+        setTimeout(() => setCtrlCPressed(false), 2000);
+      }
       return;
     }
+
+    // Any other key resets the Ctrl+C state
+    if (ctrlCPressed) setCtrlCPressed(false);
 
     // Choice mode
     if (mode === "choice" && activeChoice) {
@@ -255,13 +264,17 @@ function App() {
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>ctrl+c to exit</Text>
+        {ctrlCPressed ? (
+          <Text color="yellow">Press Ctrl+C again to exit</Text>
+        ) : (
+          <Text dimColor>ctrl+c to exit</Text>
+        )}
       </Box>
     </Box>
   );
 }
 
 export async function startApp() {
-  const instance = render(<App />);
+  const instance = render(<App />, { exitOnCtrlC: false });
   await instance.waitUntilExit();
 }
