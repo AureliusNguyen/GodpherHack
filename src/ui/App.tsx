@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import { render, Text, Box, useInput, useApp } from "ink";
-
+import {
+  PROVIDER_CHOICES,
+  PROVIDERS,
+  resolveProvider,
+  type ProviderSlug,
+} from "../providers/index.js";
 
 interface ChatMessage {
   role: "user" | "system";
@@ -15,10 +20,13 @@ type InputMode = "text" | "choice";
 
 // Demo response engine (will be replaced by LLM in future)
 
-function getDemoResponse(
-  text: string,
-  turn: number,
-): { text: string; choices?: string[] } {
+interface DemoResponse {
+  text: string;
+  choices?: string[];
+  selectProvider?: ProviderSlug;
+}
+
+function getDemoResponse(text: string, turn: number): DemoResponse {
   const lower = text.toLowerCase();
 
   if (turn === 0) {
@@ -36,7 +44,7 @@ function getDemoResponse(
   if (lower.includes("solve") || lower.includes("challenge")) {
     return {
       text: "Which model would you like to use for solving?",
-      choices: ["Claude (Anthropic)", "GPT-4 (OpenAI)", "Gemini (Google)"],
+      choices: PROVIDER_CHOICES,
     };
   }
 
@@ -46,20 +54,18 @@ function getDemoResponse(
     lower.includes("config")
   ) {
     return {
-      text: "API key configuration coming next sprint. Which provider are you setting up?",
-      choices: ["Anthropic", "OpenAI", "Google", "Custom endpoint"],
+      text: "Which provider are you setting up?",
+      choices: PROVIDER_CHOICES,
     };
   }
 
-  if (lower.includes("claude") || lower.includes("anthropic")) {
+  // Check if user selected a provider
+  const resolved = resolveProvider(text);
+  if (resolved) {
+    const info = PROVIDERS[resolved];
     return {
-      text: "Claude selected! You'll need an Anthropic API key. This will be configurable soon.",
-    };
-  }
-
-  if (lower.includes("gpt") || lower.includes("openai")) {
-    return {
-      text: "GPT-4 selected! You'll need an OpenAI API key. This will be configurable soon.",
+      text: `${info.displayName} selected! Set your API key via: export ${info.envKey}=<your-key>`,
+      selectProvider: resolved,
     };
   }
 
@@ -72,13 +78,13 @@ function getDemoResponse(
   }
 
   return {
-    text: `Roger that. This is demo mode — your chosen LLM will power responses soon.`,
+    text: "Roger that. This is demo mode — your chosen LLM will power responses soon.",
   };
 }
 
-// Components 
+// Components
 
-function Header() {
+function Header({ provider }: { provider: ProviderSlug | null }) {
   return (
     <Box
       borderStyle="round"
@@ -89,6 +95,12 @@ function Header() {
       <Text bold color="cyan">
         GodpherHack v0.1.0
       </Text>
+      {provider && (
+        <Text color="gray">
+          {" "}
+          [{PROVIDERS[provider].displayName}]
+        </Text>
+      )}
     </Box>
   );
 }
@@ -177,6 +189,7 @@ function App() {
   const [cursor, setCursor] = useState(0);
   const [turn, setTurn] = useState(0);
   const [ctrlCPressed, setCtrlCPressed] = useState(false);
+  const [provider, setProvider] = useState<ProviderSlug | null>(null);
 
   const pushMessages = (...msgs: ChatMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
@@ -187,6 +200,10 @@ function App() {
     setTurn((t) => t + 1);
 
     pushMessages({ role: "user", text }, { role: "system", text: response.text });
+
+    if (response.selectProvider) {
+      setProvider(response.selectProvider);
+    }
 
     if (response.choices) {
       setActiveChoice({ options: response.choices });
@@ -249,7 +266,7 @@ function App() {
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Header />
+      <Header provider={provider} />
 
       <Box flexDirection="column" marginTop={1}>
         {messages.map((msg, i) => (
