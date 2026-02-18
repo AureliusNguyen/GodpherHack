@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { render, Text, Box, useInput, useApp } from "ink";
+import Spinner from "ink-spinner";
 import {
   PROVIDER_CHOICES,
   PROVIDERS,
@@ -16,7 +17,7 @@ interface ActiveChoice {
   options: string[];
 }
 
-type InputMode = "text" | "choice";
+type InputMode = "text" | "choice" | "api-key" | "processing";
 
 // Demo response engine (will be replaced by LLM in future)
 
@@ -62,10 +63,9 @@ function getDemoResponse(text: string, turn: number): DemoResponse {
   // Check if user selected a provider
   const resolved = resolveProvider(text);
   if (resolved) {
-    const info = PROVIDERS[resolved];
     return {
-      text: `${info.displayName} selected! Set your API key via: export ${info.envKey}=<your-key>`,
       selectProvider: resolved,
+      text: `${PROVIDERS[resolved].displayName} selected! Please enter your API key:`,
     };
   }
 
@@ -80,6 +80,11 @@ function getDemoResponse(text: string, turn: number): DemoResponse {
   return {
     text: "Roger that. This is demo mode — your chosen LLM will power responses soon.",
   };
+}
+
+function maskKey(key: string): string {
+  if (key.length <= 8) return "*".repeat(key.length);
+  return key.slice(0, 4) + "*".repeat(key.length - 8) + key.slice(-4);
 }
 
 // Components
@@ -148,7 +153,16 @@ function ChoiceSelector({
   );
 }
 
-function InputBox({ value }: { value: string }) {
+function InputBox({
+  value,
+  placeholder,
+  masked,
+}: {
+  value: string;
+  placeholder?: string;
+  masked?: boolean;
+}) {
+  const display = masked ? "*".repeat(value.length) : value;
   return (
     <Box marginTop={1}>
       <Text color="cyan" bold>
@@ -156,19 +170,30 @@ function InputBox({ value }: { value: string }) {
       </Text>
       {value ? (
         <Text>
-          {value}
+          {display}
           <Text color="cyan" bold>
             _
           </Text>
         </Text>
       ) : (
         <Text>
-          <Text color="gray">Type a message...</Text>
+          <Text color="gray">{placeholder || "Type a message..."}</Text>
           <Text color="cyan" bold>
             _
           </Text>
         </Text>
       )}
+    </Box>
+  );
+}
+
+function ProcessingIndicator({ text }: { text: string }) {
+  return (
+    <Box marginTop={1}>
+      <Text color="cyan">
+        <Spinner type="dots" />
+      </Text>
+      <Text> {text}</Text>
     </Box>
   );
 }
@@ -190,6 +215,8 @@ function App() {
   const [turn, setTurn] = useState(0);
   const [ctrlCPressed, setCtrlCPressed] = useState(false);
   const [provider, setProvider] = useState<ProviderSlug | null>(null);
+  const [pendingProvider, setPendingProvider] = useState<ProviderSlug | null>(null);
+  const [processingText, setProcessingText] = useState("");
 
   const pushMessages = (...msgs: ChatMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
@@ -202,7 +229,10 @@ function App() {
     pushMessages({ role: "user", text }, { role: "system", text: response.text });
 
     if (response.selectProvider) {
-      setProvider(response.selectProvider);
+      setPendingProvider(response.selectProvider);
+      setInput("");
+      setMode("api-key");
+      return;
     }
 
     if (response.choices) {
@@ -210,6 +240,29 @@ function App() {
       setCursor(0);
       setMode("choice");
     }
+  };
+
+  const submitApiKey = (key: string) => {
+    if (!pendingProvider) return;
+
+    const info = PROVIDERS[pendingProvider];
+    pushMessages({ role: "user", text: maskKey(key) });
+
+    setInput("");
+    setProcessingText(`Validating ${info.name} API key...`);
+    setMode("processing");
+
+    // Simulate validation delay
+    setTimeout(() => {
+      setProvider(pendingProvider);
+      pushMessages({
+        role: "system",
+        text: `API key accepted. ${info.displayName} is now active.`,
+      });
+      setPendingProvider(null);
+      setProcessingText("");
+      setMode("text");
+    }, 2000);
   };
 
   useInput((ch, key) => {
@@ -226,6 +279,9 @@ function App() {
 
     // Any other key resets the Ctrl+C state
     if (ctrlCPressed) setCtrlCPressed(false);
+
+    // Processing mode — ignore all input
+    if (mode === "processing") return;
 
     // Choice mode
     if (mode === "choice" && activeChoice) {
@@ -246,6 +302,20 @@ function App() {
           setMode("text");
           processUserInput(chosen);
         }
+      }
+      return;
+    }
+
+    // API key mode
+    if (mode === "api-key") {
+      if (key.return) {
+        if (input.trim()) {
+          submitApiKey(input.trim());
+        }
+      } else if (key.backspace || key.delete) {
+        setInput((v) => v.slice(0, -1));
+      } else if (ch && !key.ctrl && !key.meta && !key.escape) {
+        setInput((v) => v + ch);
       }
       return;
     }
@@ -276,6 +346,10 @@ function App() {
 
       {mode === "choice" && activeChoice ? (
         <ChoiceSelector options={activeChoice.options} cursor={cursor} />
+      ) : mode === "api-key" ? (
+        <InputBox value={input} placeholder="Paste your API key..." masked />
+      ) : mode === "processing" ? (
+        <ProcessingIndicator text={processingText} />
       ) : (
         <InputBox value={input} />
       )}
