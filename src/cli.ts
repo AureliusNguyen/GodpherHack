@@ -11,4 +11,13 @@ program
     await startApp();
   });
 
+program
+  .command("hub")
+  .description("Start the Hub API server")
+  .option("-p, --port <port>", "Port to listen on", "3000")
+  .action(async (opts) => {
+    const { startHub } = await import("./hub/index.js");
+    await startHub({ port: Number(opts.port) });
+  });
+
 program.parse();
