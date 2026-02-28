@@ -1,4 +1,10 @@
-import type { ChatMessage, ChatOptions, ChatWithToolsOptions, Provider, ProviderInfo } from "./types.js";
+import type {
+  ChatMessage,
+  ChatOptions,
+  ChatWithToolsOptions,
+  Provider,
+  ProviderInfo,
+} from "./types.js";
 import type {
   ChatResponse,
   ContentBlock,
@@ -7,115 +13,14 @@ import type {
   ToolResultContent,
 } from "../agent/types.js";
 import { PROVIDERS } from "./registry.js";
-
-interface GoogleGenAIClient {
-  models: {
-    generateContent(args: {
-      model: string;
-      contents: string;
-      config?: {
-        maxOutputTokens?: number;
-        temperature?: number;
-      };
-    }): Promise<{ text?: string | null }>;
-  };
-}
-
-function buildBasePrompt(system?: string, tools?: ToolDefinition[]): string {
-  const lines: string[] = [];
-
-  if (system && system.trim()) {
-    lines.push("System instructions:", system.trim(), "");
-  }
-
-  if (tools && tools.length > 0) {
-    lines.push("You can call the following tools by asking the user explicitly to run them for you:");
-    for (const tool of tools) {
-      lines.push(
-        `- ${tool.name}: ${tool.description}`,
-        `  JSON input schema: ${JSON.stringify(tool.inputSchema)}`,
-      );
-    }
-    lines.push(
-      "",
-      "When you need to use a tool, clearly describe which tool to run and the JSON arguments.",
-      "",
-    );
-  }
-
-  return lines.join("\n");
-}
-
-function buildPromptFromChatMessages(messages: ChatMessage[], system?: string): string {
-  const lines: string[] = [];
-
-  if (system && system.trim()) {
-    lines.push("System instructions:", system.trim(), "");
-  }
-
-  for (const msg of messages) {
-    const role =
-      msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "System";
-    lines.push(`${role}:`, msg.content, "");
-  }
-
-  lines.push("Assistant:");
-  return lines.join("\n");
-}
-
-function buildPromptFromProviderMessages(
-  messages: ProviderMessage[],
-  system?: string,
-  tools?: ToolDefinition[],
-): string {
-  const base = buildBasePrompt(system, tools);
-  const lines: string[] = [];
-  if (base) {
-    lines.push(base, "");
-  }
-
-  for (const msg of messages) {
-    if (msg.role === "assistant") {
-      const blocks = msg.content;
-      const textParts: string[] = [];
-      for (const block of blocks) {
-        if (block.type === "text") {
-          textParts.push(block.text);
-        } else if (block.type === "tool_use") {
-          textParts.push(
-            `Requested tool call "${block.name}" with input: ${JSON.stringify(block.input)}`,
-          );
-        }
-      }
-      if (textParts.length > 0) {
-        lines.push("Assistant:", textParts.join("\n\n"), "");
-      }
-    } else if (msg.role === "user") {
-      if (typeof msg.content === "string") {
-        lines.push("User:", msg.content, "");
-      } else {
-        // Tool results as user-provided context
-        const toolResults = msg.content as ToolResultContent[];
-        for (const tr of toolResults) {
-          lines.push(
-            `Tool result (${tr.toolUseId})${tr.isError ? " [error]" : ""}:`,
-            tr.content,
-            "",
-          );
-        }
-      }
-    }
-  }
-
-  lines.push("Assistant:");
-  return lines.join("\n");
-}
+import { GoogleGenAI } from "@google/genai";
+import type { Content, ContentListUnion } from "@google/genai";
 
 export class GoogleProvider implements Provider {
   readonly info: ProviderInfo = PROVIDERS.google;
-  private client: GoogleGenAIClient;
+  private client: GoogleGenAI;
 
-  constructor(client: GoogleGenAIClient) {
+  constructor(client: GoogleGenAI) {
     this.client = client;
   }
 
@@ -125,15 +30,30 @@ export class GoogleProvider implements Provider {
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<string> {
-    const prompt = buildPromptFromChatMessages(messages, options?.system);
-    const model = options?.model ?? "gemini-2.0-flash";
+    // Extract system messages
+    const systemMessages = messages.filter((m) => m.role === "system");
+    const chatMessages = messages.filter((m) => m.role !== "system");
+
+    // Combine system messages with explicit system option
+    const systemParts: string[] = [];
+    if (options?.system) systemParts.push(options.system);
+    for (const msg of systemMessages) systemParts.push(msg.content);
+    const system =
+      systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
 
     const result = await this.client.models.generateContent({
-      model,
-      contents: prompt,
+      model: options?.model ?? "gemini-2.0-flash",
+      contents: chatMessages.map(
+        (m) =>
+          ({
+            role: m.role === "user" ? "user" : "assistant",
+            parts: [{ text: m.content }],
+          }) as Content,
+      ),
       config: {
-        maxOutputTokens: options?.maxTokens ?? 2048,
+        maxOutputTokens: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0,
+        systemInstruction: system,
       },
     });
 
@@ -144,18 +64,53 @@ export class GoogleProvider implements Provider {
     messages: ProviderMessage[],
     options?: ChatWithToolsOptions,
   ): Promise<ChatResponse> {
-    const prompt = buildPromptFromProviderMessages(messages, options?.system, options?.tools);
-    const model = options?.model ?? "gemini-2.0-flash";
+    const sdkMessages = messages.map((msg) => {
+      if (msg.role === "assistant") {
+        // Assistant messages have ContentBlock[] content
+        return {
+          role: "assistant" as const,
+          content: msg.content.map((block) => {
+            if (block.type === "text") {
+              return { type: "text" as const, text: block.text };
+            }
+            // tool_use block
+            return {
+              type: "tool_use" as const,
+              id: block.id,
+              name: block.name,
+              input: block.input,
+            };
+          }),
+        };
+      }
+
+      // User messages — either plain string or ToolResultContent[]
+      if (typeof msg.content === "string") {
+        return { role: "user" as const, content: msg.content };
+      }
+
+      // Tool result content blocks
+      return {
+        role: "user" as const,
+        content: msg.content.map((tr) => ({
+          type: "tool_result" as const,
+          tool_use_id: tr.toolUseId,
+          content: tr.content,
+          ...(tr.isError ? { is_error: true } : {}),
+        })),
+      };
+    });
 
     const result = await this.client.models.generateContent({
-      model,
-      contents: prompt,
+      model: options?.model ?? "gemini-2.0-flash",
+      contents: sdkMessages,
       config: {
         maxOutputTokens: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0,
       },
     });
 
+    // TODO: naive: just return the entire response as a block of text
     const text = result.text ?? "";
     const content: ContentBlock[] = text ? [{ type: "text", text }] : [];
 
@@ -166,9 +121,9 @@ export class GoogleProvider implements Provider {
   }
 }
 
-export async function createGoogleProvider(apiKey: string): Promise<GoogleProvider> {
-  const { GoogleGenAI } = await import("@google/genai");
-  const client = new GoogleGenAI({ apiKey }) as unknown as GoogleGenAIClient;
+export async function createGoogleProvider(
+  apiKey: string,
+): Promise<GoogleProvider> {
+  const client = new GoogleGenAI({ apiKey });
   return new GoogleProvider(client);
 }
-
