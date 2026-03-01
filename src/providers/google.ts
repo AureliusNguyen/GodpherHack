@@ -39,15 +39,12 @@ export class GoogleProvider implements Provider {
     const system =
       systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
 
-    const result = await this.client.models.generateContent({
+    const response = await this.client.models.generateContent({
       model: options?.model ?? "gemini-2.0-flash",
-      contents: chatMessages.map(
-        (m) =>
-          ({
-            role: m.role === "user" ? "user" : "assistant",
-            parts: [{ text: m.content }],
-          }) as Content,
-      ),
+      contents: chatMessages.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        parts: [{ text: m.content }],
+      })),
       config: {
         maxOutputTokens: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0,
@@ -55,7 +52,7 @@ export class GoogleProvider implements Provider {
       },
     });
 
-    return result.text ?? "";
+    return response.text ?? "";
   }
 
   async chatWithTools(
@@ -111,7 +108,9 @@ export class GoogleProvider implements Provider {
             functionResponse: {
               id: tr.toolUseId,
               ...(name ? { name } : {}),
-              response: tr.isError ? { error: tr.content } : { output: tr.content },
+              response: tr.isError
+                ? { error: tr.content }
+                : { output: tr.content },
             },
           };
         }),
@@ -167,8 +166,10 @@ export class GoogleProvider implements Provider {
     }
 
     let stopReason: ChatResponse["stopReason"] = "end_turn";
-    if (content.some((block) => block.type === "tool_use")) stopReason = "tool_use";
-    else if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") stopReason = "max_tokens";
+    if (content.some((block) => block.type === "tool_use"))
+      stopReason = "tool_use";
+    else if (response.candidates?.[0]?.finishReason === "MAX_TOKENS")
+      stopReason = "max_tokens";
 
     return {
       content,
