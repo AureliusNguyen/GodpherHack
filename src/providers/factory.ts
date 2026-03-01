@@ -7,7 +7,10 @@ export const PROVIDER_MODELS: Record<ProviderSlug, Array<{ id: string; label: st
     { id: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
   ],
   openai: [],
-  google: [],
+  google: [
+    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
 };
 
 export function resolveApiKey(slug: ProviderSlug): string | null {
@@ -22,8 +25,10 @@ export async function createProvider(slug: ProviderSlug, apiKey: string): Promis
     }
     case "openai":
       throw new Error("OpenAI provider not yet implemented");
-    case "google":
-      throw new Error("Google provider not yet implemented");
+    case "google": {
+      const { createGoogleProvider } = await import("./google.js");
+      return createGoogleProvider(apiKey);
+    }
   }
 }
 
