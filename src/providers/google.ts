@@ -9,12 +9,10 @@ import type {
   ChatResponse,
   ContentBlock,
   ProviderMessage,
-  ToolDefinition,
-  ToolResultContent,
 } from "../agent/types.js";
 import { PROVIDERS } from "./registry.js";
-import { GoogleGenAI } from "@google/genai";
-import type { Content, ContentListUnion } from "@google/genai";
+import { FunctionCallingConfigMode, GoogleGenAI } from "@google/genai";
+import type { Content } from "@google/genai";
 
 export class GoogleProvider implements Provider {
   readonly info: ProviderInfo = PROVIDERS.google;
@@ -64,21 +62,33 @@ export class GoogleProvider implements Provider {
     messages: ProviderMessage[],
     options?: ChatWithToolsOptions,
   ): Promise<ChatResponse> {
-    const sdkMessages = messages.map((msg) => {
+    // Gemini function responses ideally include the original tool name.
+    const toolUseNameById = new Map<string, string>();
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      for (const block of msg.content) {
+        if (block.type === "tool_use") {
+          toolUseNameById.set(block.id, block.name);
+        }
+      }
+    }
+
+    const sdkMessages: Content[] = messages.map((msg) => {
       if (msg.role === "assistant") {
         // Assistant messages have ContentBlock[] content
         return {
-          role: "assistant" as const,
-          content: msg.content.map((block) => {
+          role: "model",
+          parts: msg.content.map((block) => {
             if (block.type === "text") {
-              return { type: "text" as const, text: block.text };
+              return { text: block.text };
             }
-            // tool_use block
+
             return {
-              type: "tool_use" as const,
-              id: block.id,
-              name: block.name,
-              input: block.input,
+              functionCall: {
+                id: block.id,
+                name: block.name,
+                args: block.input,
+              },
             };
           }),
         };
@@ -86,20 +96,33 @@ export class GoogleProvider implements Provider {
 
       // User messages — either plain string or ToolResultContent[]
       if (typeof msg.content === "string") {
-        return { role: "user" as const, content: msg.content };
+        return {
+          role: "user",
+          parts: [{ text: msg.content }],
+        };
       }
 
       // Tool result content blocks
       return {
-        role: "user" as const,
-        content: msg.content.map((tr) => ({
-          type: "tool_result" as const,
-          tool_use_id: tr.toolUseId,
-          content: tr.content,
-          ...(tr.isError ? { is_error: true } : {}),
-        })),
+        role: "user",
+        parts: msg.content.map((tr) => {
+          const name = toolUseNameById.get(tr.toolUseId);
+          return {
+            functionResponse: {
+              id: tr.toolUseId,
+              ...(name ? { name } : {}),
+              response: tr.isError ? { error: tr.content } : { output: tr.content },
+            },
+          };
+        }),
       };
     });
+
+    const functionDeclarations = options?.tools?.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    }));
 
     const result = await this.client.models.generateContent({
       model: options?.model ?? "gemini-2.0-flash",
@@ -107,16 +130,52 @@ export class GoogleProvider implements Provider {
       config: {
         maxOutputTokens: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0,
+        ...(options?.system ? { systemInstruction: options.system } : {}),
+        ...(functionDeclarations && functionDeclarations.length > 0
+          ? {
+              tools: [{ functionDeclarations }],
+              toolConfig: {
+                functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO },
+              },
+            }
+          : {}),
       },
     });
 
-    // TODO: naive: just return the entire response as a block of text
-    const text = result.text ?? "";
-    const content: ContentBlock[] = text ? [{ type: "text", text }] : [];
+    const content: ContentBlock[] = [];
+    const responseParts = result.candidates?.[0]?.content?.parts ?? [];
+    let generatedToolCallIndex = 0;
+
+    for (const part of responseParts) {
+      if (part.text) {
+        content.push({ type: "text", text: part.text });
+      }
+
+      if (part.functionCall?.name) {
+        content.push({
+          type: "tool_use",
+          id: part.functionCall.id ?? `tool_call_${generatedToolCallIndex++}`,
+          name: part.functionCall.name,
+          input: (part.functionCall.args ?? {}) as Record<string, unknown>,
+        });
+      }
+    }
+
+    if (content.length === 0 && result.text) {
+      content.push({ type: "text", text: result.text });
+    }
+
+    const hasToolUse = content.some((block) => block.type === "tool_use");
+    const finishReason = result.candidates?.[0]?.finishReason;
+    const stopReason: ChatResponse["stopReason"] = hasToolUse
+      ? "tool_use"
+      : finishReason === "MAX_TOKENS"
+        ? "max_tokens"
+        : "end_turn";
 
     return {
       content,
-      stopReason: "end_turn",
+      stopReason,
     };
   }
 }
