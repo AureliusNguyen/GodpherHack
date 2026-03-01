@@ -40,7 +40,7 @@ export class GoogleProvider implements Provider {
       systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
 
     const response = await this.client.models.generateContent({
-      model: options?.model ?? "gemini-2.0-flash",
+      model: options?.model ?? "gemini-2.5-flash",
       contents: chatMessages.map((m) => ({
         role: m.role === "user" ? "user" : "assistant",
         parts: [{ text: m.content }],
@@ -125,7 +125,7 @@ export class GoogleProvider implements Provider {
     }));
 
     const response = await this.client.models.generateContent({
-      model: options?.model ?? "gemini-2.0-flash",
+      model: options?.model ?? "gemini-2.5-flash",
       contents: sdkMessages,
       config: {
         maxOutputTokens: options?.maxTokens ?? 4096,
