@@ -82,7 +82,7 @@ export class GoogleProvider implements Provider {
             if (block.type === "text") {
               return { text: block.text };
             }
-
+            // tool_use block
             return {
               functionCall: {
                 id: block.id,
@@ -97,14 +97,14 @@ export class GoogleProvider implements Provider {
       // User messages — either plain string or ToolResultContent[]
       if (typeof msg.content === "string") {
         return {
-          role: "user",
+          role: "user" as const,
           parts: [{ text: msg.content }],
         };
       }
 
       // Tool result content blocks
       return {
-        role: "user",
+        role: "user" as const,
         parts: msg.content.map((tr) => {
           const name = toolUseNameById.get(tr.toolUseId);
           return {
@@ -118,13 +118,14 @@ export class GoogleProvider implements Provider {
       };
     });
 
+    // Tools
     const functionDeclarations = options?.tools?.map((t) => ({
       name: t.name,
       description: t.description,
       parameters: t.inputSchema,
     }));
 
-    const result = await this.client.models.generateContent({
+    const response = await this.client.models.generateContent({
       model: options?.model ?? "gemini-2.0-flash",
       contents: sdkMessages,
       config: {
@@ -143,7 +144,7 @@ export class GoogleProvider implements Provider {
     });
 
     const content: ContentBlock[] = [];
-    const responseParts = result.candidates?.[0]?.content?.parts ?? [];
+    const responseParts = response.candidates?.[0]?.content?.parts ?? [];
     let generatedToolCallIndex = 0;
 
     for (const part of responseParts) {
@@ -161,17 +162,13 @@ export class GoogleProvider implements Provider {
       }
     }
 
-    if (content.length === 0 && result.text) {
-      content.push({ type: "text", text: result.text });
+    if (content.length === 0 && response.text) {
+      content.push({ type: "text", text: response.text });
     }
 
-    const hasToolUse = content.some((block) => block.type === "tool_use");
-    const finishReason = result.candidates?.[0]?.finishReason;
-    const stopReason: ChatResponse["stopReason"] = hasToolUse
-      ? "tool_use"
-      : finishReason === "MAX_TOKENS"
-        ? "max_tokens"
-        : "end_turn";
+    let stopReason: ChatResponse["stopReason"] = "end_turn";
+    if (content.some((block) => block.type === "tool_use")) stopReason = "tool_use";
+    else if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") stopReason = "max_tokens";
 
     return {
       content,
