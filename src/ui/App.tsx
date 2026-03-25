@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { render, Text, Box, useInput, useApp } from "ink";
 import Spinner from "ink-spinner";
+import Gradient from "ink-gradient";
 import {
   PROVIDER_CHOICES,
   PROVIDERS,
@@ -165,18 +166,52 @@ function MarkdownText({ children }: { children: string }) {
 
 // --- Components ---
 
+const LOGO_LINES = [
+  " ██████╗   ██████╗  ██████╗  ██████╗  ██╗  ██╗ ██████╗  ██████╗  ██╗  ██╗ ██╗  ██╗  ██████╗ ██╗  ██╗",
+  "██╔════╝  ██╔═████╗ ██╔══██╗ ██╔══██╗ ██║  ██║ ╚════██╗ ██╔══██╗ ██║  ██║ ██║  ██║ ██╔════╝ ██║ ██╔╝",
+  "██║  ███╗ ██║██╔██║ ██║  ██║ ██████╔╝ ███████║  █████╔╝ ██████╔╝ ███████║ ███████║ ██║      █████╔╝ ",
+  "██║   ██║ ████╔╝██║ ██║  ██║ ██╔═══╝  ██╔══██║  ╚═══██╗ ██╔══██╗ ██╔══██║ ╚════██║ ██║      ██╔═██╗",
+  "╚██████╔╝ ╚██████╔╝ ██████╔╝ ██║      ██║  ██║ ██████╔╝ ██║  ██║ ██║  ██║      ██║ ╚██████╗ ██║  ██╗",
+  " ╚═════╝   ╚═════╝  ╚═════╝  ╚═╝      ╚═╝  ╚═╝ ╚═════╝  ╚═╝  ╚═╝ ╚═╝  ╚═╝      ╚═╝  ╚═════╝ ╚═╝  ╚═╝",
+];
+
+// Top-to-bottom gradient: dark red → bright red
+const LOGO_COLORS = ["#FF0000", "#D60000", "#AD0000", "#850000", "#5C0000", "#330000"];
+
 function Header() {
   return (
-    <Box
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={3}
-      justifyContent="center"
-    >
-      <Text bold color="cyan">
-        GodpherHack v0.1.0
-      </Text>
+    <Box flexDirection="column">
+      {LOGO_LINES.map((line, i) => (
+        <Text key={i} color={LOGO_COLORS[i]}>{line}</Text>
+      ))}
     </Box>
+  );
+}
+
+const MemoHeader = React.memo(Header);
+
+const GRADIENT_CYCLE = [
+  "#FF0000", "#DD0000", "#AA0000", "#770000", "#440000",
+  "#770000", "#AA0000", "#DD0000",
+];
+
+function GradientLabel({ children }: { children: string }) {
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((f) => (f + 1) % GRADIENT_CYCLE.length), 150);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Slide a window through the cycle to create moving effect
+  const colors = Array.from({ length: 4 }, (_, i) =>
+    GRADIENT_CYCLE[(frame + i) % GRADIENT_CYCLE.length],
+  );
+
+  return (
+    <Gradient colors={colors}>
+      <Text bold>{children}</Text>
+    </Gradient>
   );
 }
 
@@ -197,7 +232,7 @@ function MessageView({ msg, expanded }: { msg: DisplayMessage; expanded: boolean
       return (
         <Box flexDirection="column" marginBottom={0}>
           <Box>
-            <Text color="cyan" bold>godpherhack</Text>
+            <GradientLabel>G0dph3rh4ck</GradientLabel>
             <Text color="gray"> &gt; </Text>
             <MarkdownText>{text}</MarkdownText>
           </Box>
@@ -235,7 +270,7 @@ function MessageView({ msg, expanded }: { msg: DisplayMessage; expanded: boolean
     case "system":
       return (
         <Box marginBottom={0}>
-          <Text color="cyan" bold>godpherhack</Text>
+          <GradientLabel>G0dph3rh4ck</GradientLabel>
           <Text color="gray"> &gt; </Text>
           <MarkdownText>{msg.text}</MarkdownText>
         </Box>
@@ -250,14 +285,14 @@ function ChoiceSelector({
   options: string[];
   cursor: number;
 }) {
-  const all = [...options, "Other (type your answer)"];
+  const all = [...options, "Other (Not supported yet)"];
   return (
     <Box flexDirection="column" marginLeft={2} marginTop={1} marginBottom={1}>
       {all.map((opt, i) => {
         const active = i === cursor;
         return (
           <Box key={opt}>
-            <Text color={active ? "cyan" : "white"} bold={active}>
+            <Text color={active ? "red" : "white"} bold={active}>
               {active ? " > " : "   "}
               {opt}
             </Text>
@@ -283,20 +318,20 @@ function InputBox({
   const display = masked ? "*".repeat(value.length) : value;
   return (
     <Box marginTop={1}>
-      <Text color="cyan" bold>
+      <Text color="red" bold>
         {">"}{" "}
       </Text>
       {value ? (
         <Text>
           {display}
-          <Text color="cyan" bold>
+          <Text color="red" bold>
             _
           </Text>
         </Text>
       ) : (
         <Text>
           <Text color="gray">{placeholder || "Type a message..."}</Text>
-          <Text color="cyan" bold>
+          <Text color="red" bold>
             _
           </Text>
         </Text>
@@ -308,7 +343,7 @@ function InputBox({
 function ProcessingIndicator({ text }: { text: string }) {
   return (
     <Box marginTop={1}>
-      <Text color="cyan">
+      <Text color="red">
         <Spinner type="dots" />
       </Text>
       <Text> {text}</Text>
@@ -331,7 +366,7 @@ function App({ challengeDir }: AppProps) {
     {
       id: nextId(),
       type: "system",
-      text: "Welcome to GodpherHack! Select a provider to get started.",
+      text: "Welcome lil bro! Select a provider to get started.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -366,16 +401,58 @@ function App({ challengeDir }: AppProps) {
 
   function handleProviderChoice(chosen: string) {
     const slug = resolveProvider(chosen);
-    if (slug) {
-      setPendingProvider(slug);
+    if (!slug) return;
+
+    // Check if API key is already in env
+    const envKey = process.env[PROVIDERS[slug].envKey];
+    if (envKey) {
+      // Skip API key prompt — initialize directly
       pushMessages({
         id: nextId(),
         type: "system",
-        text: `${PROVIDERS[slug].displayName} selected. Enter your API key:`,
+        text: `${PROVIDERS[slug].displayName} selected (API key found in env).`,
       });
-      setInput("");
-      setMode("api-key");
+      setProcessingText(`Initializing ${PROVIDERS[slug].name}...`);
+      setMode("processing");
+
+      createProvider(slug, envKey)
+        .then((instance) => {
+          setProvider(slug);
+          setProviderInstance(instance);
+          const models = PROVIDER_MODELS[slug];
+          if (models.length > 0) setSelectedModel(models[0].id);
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `${PROVIDERS[slug].displayName} is ready. Start chatting!`,
+          });
+        })
+        .catch((err) => {
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `Failed to initialize: ${err instanceof Error ? err.message : String(err)}. Enter API key manually:`,
+          });
+          setPendingProvider(slug);
+          setMode("api-key");
+          return;
+        })
+        .finally(() => {
+          setProcessingText("");
+          if (mode !== "api-key") setMode("text");
+        });
+      return;
     }
+
+    // No env key — ask for it manually
+    setPendingProvider(slug);
+    pushMessages({
+      id: nextId(),
+      type: "system",
+      text: `${PROVIDERS[slug].displayName} selected. Enter your API key:`,
+    });
+    setInput("");
+    setMode("api-key");
   }
 
   const handleModelCommand = () => {
@@ -643,7 +720,7 @@ function App({ challengeDir }: AppProps) {
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Header />
+      <MemoHeader />
 
       <Box flexDirection="column" marginTop={1}>
         {messages.map((msg) => (
