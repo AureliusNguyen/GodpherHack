@@ -86,5 +86,6 @@ prompts/
 ./build.sh              # Build with tsup
 ./test.sh               # Run vitest suite
 ./run.sh                # Build + launch CLI
+./upsert-pinecone.sh    # Upsert new writeups to Pinecone Vector DB
 npx tsc --noEmit        # Type-check (separate from build)
 ```
