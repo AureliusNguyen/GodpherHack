@@ -7,3 +7,5 @@ CLAUDE.md
 proposal.tex
 master.txt
 challenges/
+writeups/**/*.txt
+writeups/.upserted.json

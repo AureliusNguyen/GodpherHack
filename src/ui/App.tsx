@@ -18,7 +18,7 @@ import {
   type ProviderMessage,
   type AgentEvent,
 } from "../agent/index.js";
-import { GHIDRA_TOOL_DEFINITIONS, createGhidraAdapter } from "../tools/index.js";
+import { GHIDRA_TOOL_DEFINITIONS, createGhidraAdapter, IDA_TOOL_DEFINITIONS, createIdaAdapter } from "../tools/index.js";
 
 // --- Display message types (stable IDs for React keys) ---
 
@@ -353,6 +353,7 @@ function App({ challengeDir }: AppProps) {
   // MCP tool bridge — lazy-connects adapters on first tool invocation
   const mcpBridge = useRef(new McpToolBridge([
     { name: "GhidraMCP", promptKey: "ghidra", tools: GHIDRA_TOOL_DEFINITIONS, createAdapter: createGhidraAdapter },
+    { name: "IdaProMCP", promptKey: "ida", tools: IDA_TOOL_DEFINITIONS, createAdapter: createIdaAdapter },
   ]));
   // Disconnect MCP adapters on unmount
   useEffect(() => () => { mcpBridge.current.disconnectAll(); }, []);
