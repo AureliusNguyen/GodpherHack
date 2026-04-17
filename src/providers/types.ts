@@ -8,10 +8,29 @@ export interface ProviderInfo {
   packageName: string;
 }
 
+export interface ChatOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  system?: string;
+}
+
+export interface ChatWithToolsOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  system?: string;
+  tools?: import("../agent/types.js").ToolDefinition[];
+}
+
 export interface Provider {
   readonly info: ProviderInfo;
   validateKey(apiKey: string): Promise<boolean>;
-  chat(messages: ChatMessage[]): Promise<string>;
+  chat(messages: ChatMessage[], options?: ChatOptions): Promise<string>;
+  chatWithTools?(
+    messages: import("../agent/types.js").ProviderMessage[],
+    options?: ChatWithToolsOptions,
+  ): Promise<import("../agent/types.js").ChatResponse>;
 }
 
 export interface ChatMessage {

@@ -6,9 +6,10 @@ program
   .name("Godpherhack")
   .description("CLI Agent for CTF solving")
   .version("0.1.0")
-  .action(async () => {
+  .option("-d, --challenge-dir <dir>", "Challenge working directory", process.cwd())
+  .action(async (opts) => {
     const { startApp } = await import("./ui/App.js");
-    await startApp();
+    await startApp({ challengeDir: opts.challengeDir });
   });
 
 program

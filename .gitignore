@@ -5,3 +5,7 @@ dist/
 CLAUDE.md
 .claude/
 proposal.tex
+master.txt
+challenges/
+writeups/**/*.txt
+writeups/.upserted.json

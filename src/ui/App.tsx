@@ -1,128 +1,282 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { render, Text, Box, useInput, useApp } from "ink";
 import Spinner from "ink-spinner";
+import Gradient from "ink-gradient";
 import {
   PROVIDER_CHOICES,
   PROVIDERS,
+  PROVIDER_MODELS,
   resolveProvider,
+  createProvider,
+  type Provider,
   type ProviderSlug,
 } from "../providers/index.js";
+import {
+  agentLoop,
+  createBuiltinTools,
+  createWriteupTools,
+  buildSystemPrompt,
+  McpToolBridge,
+  type ProviderMessage,
+  type AgentEvent,
+} from "../agent/index.js";
+import { GHIDRA_TOOL_DEFINITIONS, createGhidraAdapter, IDA_TOOL_DEFINITIONS, createIdaAdapter } from "../tools/index.js";
 
-interface ChatMessage {
-  role: "user" | "system";
+// --- Display message types (stable IDs for React keys) ---
+
+interface DisplayMessageBase {
+  id: string;
+  type: string;
+}
+
+interface UserMessage extends DisplayMessageBase {
+  type: "user";
   text: string;
 }
 
+interface AssistantMessage extends DisplayMessageBase {
+  type: "assistant";
+  text: string;
+}
+
+interface ToolCallMessage extends DisplayMessageBase {
+  type: "tool_call";
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+interface ToolResultMessage extends DisplayMessageBase {
+  type: "tool_result";
+  toolName: string;
+  output: string;
+  isError: boolean;
+  durationMs: number;
+}
+
+interface SystemMessage extends DisplayMessageBase {
+  type: "system";
+  text: string;
+}
+
+type DisplayMessage =
+  | UserMessage
+  | AssistantMessage
+  | ToolCallMessage
+  | ToolResultMessage
+  | SystemMessage;
+
 interface ActiveChoice {
   options: string[];
+  onSelect?: (chosen: string) => void;
 }
 
 type InputMode = "text" | "choice" | "api-key" | "processing";
 
-// Demo response engine (will be replaced by LLM in future)
-
-interface DemoResponse {
-  text: string;
-  choices?: string[];
-  selectProvider?: ProviderSlug;
-}
-
-function getDemoResponse(text: string, turn: number): DemoResponse {
-  const lower = text.toLowerCase();
-
-  if (turn === 0) {
-    return {
-      text: "Nice to meet you! What would you like to do?",
-      choices: [
-        "Solve a challenge",
-        "Configure API keys",
-        "View past runs",
-        "Run diagnostics",
-      ],
-    };
-  }
-
-  if (lower.includes("solve") || lower.includes("challenge")) {
-    return {
-      text: "Which model would you like to use for solving?",
-      choices: PROVIDER_CHOICES,
-    };
-  }
-
-  if (
-    lower.includes("api") ||
-    lower.includes("key") ||
-    lower.includes("config")
-  ) {
-    return {
-      text: "Which provider are you setting up?",
-      choices: PROVIDER_CHOICES,
-    };
-  }
-
-  // Check if user selected a provider
-  const resolved = resolveProvider(text);
-  if (resolved) {
-    return {
-      selectProvider: resolved,
-      text: `${PROVIDERS[resolved].displayName} selected! Please enter your API key:`,
-    };
-  }
-
-  if (lower.includes("runs") || lower.includes("history")) {
-    return { text: "No runs found yet. Start by solving a challenge!" };
-  }
-
-  if (lower.includes("diagnostic")) {
-    return { text: "All systems operational. Node " + process.version + "." };
-  }
-
-  return {
-    text: "Roger that. This is demo mode — your chosen LLM will power responses soon.",
-  };
-}
+// --- Helpers ---
 
 function maskKey(key: string): string {
   if (key.length <= 8) return "*".repeat(key.length);
   return key.slice(0, 4) + "*".repeat(key.length - 8) + key.slice(-4);
 }
 
-// Components
+function truncateText(text: string, maxLines = 15): string {
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return text;
+  return lines.slice(0, maxLines).join("\n") + `\n[+${lines.length - maxLines} more lines]`;
+}
 
-function Header({ provider }: { provider: ProviderSlug | null }) {
+function isTruncatable(msg: DisplayMessage): boolean {
+  if (msg.type === "assistant") return msg.text.split("\n").length > 15;
+  if (msg.type === "tool_result") return msg.output.split("\n").length > 15;
+  return false;
+}
+
+function formatToolInput(name: string, input: Record<string, unknown>): string {
+  if (name === "bash" && typeof input.command === "string") {
+    return `bash(${input.command})`;
+  }
+  if ((name === "read_file" || name === "write_file") && typeof input.path === "string") {
+    return `${name}(${input.path})`;
+  }
+  if (name === "list_files") {
+    return `list_files(${(input.path as string) ?? "."})`;
+  }
+  const summary = JSON.stringify(input);
+  return `${name}(${summary.length > 80 ? summary.slice(0, 77) + "..." : summary})`;
+}
+
+// --- Inline markdown renderer ---
+
+interface MdSegment {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  code?: boolean;
+}
+
+/** Parse basic inline markdown: **bold**, *italic*, `code` */
+function parseInlineMarkdown(input: string): MdSegment[] {
+  const segments: MdSegment[] = [];
+  // Match **bold**, *italic*, `code` — in priority order
+  const pattern = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(input)) !== null) {
+    // Push plain text before this match
+    if (match.index > lastIndex) {
+      segments.push({ text: input.slice(lastIndex, match.index) });
+    }
+    if (match[2] != null) {
+      segments.push({ text: match[2], bold: true });
+    } else if (match[4] != null) {
+      segments.push({ text: match[4], italic: true });
+    } else if (match[6] != null) {
+      segments.push({ text: match[6], code: true });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining plain text
+  if (lastIndex < input.length) {
+    segments.push({ text: input.slice(lastIndex) });
+  }
+
+  return segments.length > 0 ? segments : [{ text: input }];
+}
+
+function MarkdownText({ children }: { children: string }) {
+  const segments = parseInlineMarkdown(children);
   return (
-    <Box
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={3}
-      justifyContent="center"
-    >
-      <Text bold color="cyan">
-        GodpherHack v0.1.0
-      </Text>
-      {provider && (
-        <Text color="gray">
-          {" "}
-          [{PROVIDERS[provider].displayName}]
-        </Text>
-      )}
+    <Text wrap="wrap">
+      {segments.map((seg, i) => {
+        if (seg.code) {
+          return <Text key={i} color="yellow">{seg.text}</Text>;
+        }
+        if (seg.bold) {
+          return <Text key={i} bold>{seg.text}</Text>;
+        }
+        if (seg.italic) {
+          return <Text key={i} italic>{seg.text}</Text>;
+        }
+        return <Text key={i}>{seg.text}</Text>;
+      })}
+    </Text>
+  );
+}
+
+// --- Components ---
+
+const LOGO_LINES = [
+  " ██████╗   ██████╗  ██████╗  ██████╗  ██╗  ██╗ ██████╗  ██████╗  ██╗  ██╗ ██╗  ██╗  ██████╗ ██╗  ██╗",
+  "██╔════╝  ██╔═████╗ ██╔══██╗ ██╔══██╗ ██║  ██║ ╚════██╗ ██╔══██╗ ██║  ██║ ██║  ██║ ██╔════╝ ██║ ██╔╝",
+  "██║  ███╗ ██║██╔██║ ██║  ██║ ██████╔╝ ███████║  █████╔╝ ██████╔╝ ███████║ ███████║ ██║      █████╔╝ ",
+  "██║   ██║ ████╔╝██║ ██║  ██║ ██╔═══╝  ██╔══██║  ╚═══██╗ ██╔══██╗ ██╔══██║ ╚════██║ ██║      ██╔═██╗",
+  "╚██████╔╝ ╚██████╔╝ ██████╔╝ ██║      ██║  ██║ ██████╔╝ ██║  ██║ ██║  ██║      ██║ ╚██████╗ ██║  ██╗",
+  " ╚═════╝   ╚═════╝  ╚═════╝  ╚═╝      ╚═╝  ╚═╝ ╚═════╝  ╚═╝  ╚═╝ ╚═╝  ╚═╝      ╚═╝  ╚═════╝ ╚═╝  ╚═╝",
+];
+
+// Top-to-bottom gradient: dark red → bright red
+const LOGO_COLORS = ["#FF0000", "#D60000", "#AD0000", "#850000", "#5C0000", "#330000"];
+
+function Header() {
+  return (
+    <Box flexDirection="column">
+      {LOGO_LINES.map((line, i) => (
+        <Text key={i} color={LOGO_COLORS[i]}>{line}</Text>
+      ))}
     </Box>
   );
 }
 
-function Message({ msg }: { msg: ChatMessage }) {
-  const label = msg.role === "system" ? "godpherhack" : "you";
-  const color = msg.role === "system" ? "cyan" : "green";
+const MemoHeader = React.memo(Header);
+
+const GRADIENT_CYCLE = [
+  "#FF0000", "#DD0000", "#AA0000", "#770000", "#440000",
+  "#770000", "#AA0000", "#DD0000",
+];
+
+function GradientLabel({ children }: { children: string }) {
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((f) => (f + 1) % GRADIENT_CYCLE.length), 150);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Slide a window through the cycle to create moving effect
+  const colors = Array.from({ length: 4 }, (_, i) =>
+    GRADIENT_CYCLE[(frame + i) % GRADIENT_CYCLE.length],
+  );
 
   return (
-    <Box marginBottom={0}>
-      <Text color={color} bold>
-        {label}
-      </Text>
-      <Text color="gray"> &gt; </Text>
-      <Text wrap="wrap">{msg.text}</Text>
-    </Box>
+    <Gradient colors={colors}>
+      <Text bold>{children}</Text>
+    </Gradient>
   );
+}
+
+function MessageView({ msg, expanded }: { msg: DisplayMessage; expanded: boolean }) {
+  switch (msg.type) {
+    case "user":
+      return (
+        <Box marginBottom={0}>
+          <Text color="green" bold>you</Text>
+          <Text color="gray"> &gt; </Text>
+          <Text wrap="wrap">{msg.text}</Text>
+        </Box>
+      );
+
+    case "assistant": {
+      const text = expanded ? msg.text : truncateText(msg.text);
+      const isTruncated = !expanded && text !== msg.text;
+      return (
+        <Box flexDirection="column" marginBottom={0}>
+          <Box>
+            <GradientLabel>G0dph3rh4ck</GradientLabel>
+            <Text color="gray"> &gt; </Text>
+            <MarkdownText>{text}</MarkdownText>
+          </Box>
+          {isTruncated && <Text dimColor>  [ctrl+o to expand]</Text>}
+        </Box>
+      );
+    }
+
+    case "tool_call":
+      return (
+        <Box marginBottom={0}>
+          <Text color="yellow" bold>tool</Text>
+          <Text color="gray"> &gt; </Text>
+          <Text color="yellow" wrap="wrap">{formatToolInput(msg.toolName, msg.input)}</Text>
+        </Box>
+      );
+
+    case "tool_result": {
+      const output = expanded ? msg.output : truncateText(msg.output);
+      const isTruncated = !expanded && output !== msg.output;
+      return (
+        <Box flexDirection="column" marginBottom={0}>
+          <Box>
+            <Text color={msg.isError ? "red" : "gray"} bold>result</Text>
+            <Text color="gray"> &gt; </Text>
+            <Text color={msg.isError ? "red" : undefined} wrap="wrap">
+              {output} <Text dimColor>({msg.durationMs}ms)</Text>
+            </Text>
+          </Box>
+          {isTruncated && <Text dimColor>  [ctrl+o to expand]</Text>}
+        </Box>
+      );
+    }
+
+    case "system":
+      return (
+        <Box marginBottom={0}>
+          <GradientLabel>G0dph3rh4ck</GradientLabel>
+          <Text color="gray"> &gt; </Text>
+          <MarkdownText>{msg.text}</MarkdownText>
+        </Box>
+      );
+  }
 }
 
 function ChoiceSelector({
@@ -132,14 +286,14 @@ function ChoiceSelector({
   options: string[];
   cursor: number;
 }) {
-  const all = [...options, "Other (type your answer)"];
+  const all = [...options, "Other (Not supported yet)"];
   return (
     <Box flexDirection="column" marginLeft={2} marginTop={1} marginBottom={1}>
       {all.map((opt, i) => {
         const active = i === cursor;
         return (
-          <Box key={i}>
-            <Text color={active ? "cyan" : "white"} bold={active}>
+          <Box key={opt}>
+            <Text color={active ? "red" : "white"} bold={active}>
               {active ? " > " : "   "}
               {opt}
             </Text>
@@ -165,20 +319,20 @@ function InputBox({
   const display = masked ? "*".repeat(value.length) : value;
   return (
     <Box marginTop={1}>
-      <Text color="cyan" bold>
+      <Text color="red" bold>
         {">"}{" "}
       </Text>
       {value ? (
         <Text>
           {display}
-          <Text color="cyan" bold>
+          <Text color="red" bold>
             _
           </Text>
         </Text>
       ) : (
         <Text>
-          <Text color="gray">{placeholder || "Type a message..."}</Text>
-          <Text color="cyan" bold>
+          <Text color="gray">{placeholder || "Type a message lil bro..."}</Text>
+          <Text color="red" bold>
             _
           </Text>
         </Text>
@@ -190,7 +344,7 @@ function InputBox({
 function ProcessingIndicator({ text }: { text: string }) {
   return (
     <Box marginTop={1}>
-      <Text color="cyan">
+      <Text color="red">
         <Spinner type="dots" />
       </Text>
       <Text> {text}</Text>
@@ -198,71 +352,280 @@ function ProcessingIndicator({ text }: { text: string }) {
   );
 }
 
-// Main App
+// --- Main App ---
 
-function App() {
+interface AppProps {
+  challengeDir?: string;
+}
+
+function App({ challengeDir }: AppProps) {
   const { exit } = useApp();
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const idCounter = useRef(0);
+  const nextId = () => String(++idCounter.current);
+
+  const [messages, setMessages] = useState<DisplayMessage[]>([
     {
-      role: "system",
-      text: "Welcome to GodpherHack! Type anything to get started.",
+      id: nextId(),
+      type: "system",
+      text: "Wadup lil bro! Select a provider to get started.",
     },
   ]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<InputMode>("text");
-  const [activeChoice, setActiveChoice] = useState<ActiveChoice | null>(null);
+  const [mode, setMode] = useState<InputMode>("choice");
+  const [activeChoice, setActiveChoice] = useState<ActiveChoice | null>({
+    options: PROVIDER_CHOICES,
+    onSelect: handleProviderChoice,
+  });
   const [cursor, setCursor] = useState(0);
-  const [turn, setTurn] = useState(0);
   const [ctrlCPressed, setCtrlCPressed] = useState(false);
   const [provider, setProvider] = useState<ProviderSlug | null>(null);
   const [pendingProvider, setPendingProvider] = useState<ProviderSlug | null>(null);
   const [processingText, setProcessingText] = useState("");
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [providerInstance, setProviderInstance] = useState<Provider | null>(null);
 
-  const pushMessages = (...msgs: ChatMessage[]) => {
+  // Agent conversation history (replaces llmHistory)
+  const agentHistory = useRef<ProviderMessage[]>([]);
+  // MCP tool bridge — lazy-connects adapters on first tool invocation
+  const mcpBridge = useRef(new McpToolBridge([
+    { name: "GhidraMCP", promptKey: "ghidra", tools: GHIDRA_TOOL_DEFINITIONS, createAdapter: createGhidraAdapter },
+    { name: "IdaProMCP", promptKey: "ida", tools: IDA_TOOL_DEFINITIONS, createAdapter: createIdaAdapter },
+  ]));
+  // Disconnect MCP adapters on unmount
+  useEffect(() => () => { mcpBridge.current.disconnectAll(); }, []);
+  // Expanded message IDs (for ctrl+o toggle)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const pushMessages = (...msgs: DisplayMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
   };
 
-  const processUserInput = (text: string) => {
-    const response = getDemoResponse(text, turn);
-    setTurn((t) => t + 1);
+  function handleProviderChoice(chosen: string) {
+    const slug = resolveProvider(chosen);
+    if (!slug) return;
 
-    pushMessages({ role: "user", text }, { role: "system", text: response.text });
+    // Check if API key is already in env
+    const envKey = process.env[PROVIDERS[slug].envKey];
+    if (envKey) {
+      // Skip API key prompt — initialize directly
+      pushMessages({
+        id: nextId(),
+        type: "system",
+        text: `${PROVIDERS[slug].displayName} selected (API key found in env).`,
+      });
+      setProcessingText(`Initializing ${PROVIDERS[slug].name}...`);
+      setMode("processing");
 
-    if (response.selectProvider) {
-      setPendingProvider(response.selectProvider);
-      setInput("");
-      setMode("api-key");
+      createProvider(slug, envKey)
+        .then((instance) => {
+          setProvider(slug);
+          setProviderInstance(instance);
+          const models = PROVIDER_MODELS[slug];
+          if (models.length > 0) setSelectedModel(models[0].id);
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `${PROVIDERS[slug].displayName} is ready. Start chatting lil bro!`,
+          });
+        })
+        .catch((err) => {
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `Failed to initialize: ${err instanceof Error ? err.message : String(err)}. Enter API key manually:`,
+          });
+          setPendingProvider(slug);
+          setMode("api-key");
+          return;
+        })
+        .finally(() => {
+          setProcessingText("");
+          if (mode !== "api-key") setMode("text");
+        });
       return;
     }
 
-    if (response.choices) {
-      setActiveChoice({ options: response.choices });
+    // No env key — ask for it manually
+    setPendingProvider(slug);
+    pushMessages({
+      id: nextId(),
+      type: "system",
+      text: `${PROVIDERS[slug].displayName} selected. Enter your API key lil bro:`,
+    });
+    setInput("");
+    setMode("api-key");
+  }
+
+  const handleModelCommand = () => {
+    if (!provider) {
+      pushMessages(
+        { id: nextId(), type: "user", text: "/model" },
+        { id: nextId(), type: "system", text: "No provider selected yet lil bro." },
+      );
+      return;
+    }
+
+    const models = PROVIDER_MODELS[provider];
+    if (models.length === 0) {
+      pushMessages(
+        { id: nextId(), type: "user", text: "/model" },
+        { id: nextId(), type: "system", text: `No models available for ${PROVIDERS[provider].displayName} yet lil bro.` },
+      );
+      return;
+    }
+
+    pushMessages(
+      { id: nextId(), type: "user", text: "/model" },
+      { id: nextId(), type: "system", text: "Select a model lil bro:" },
+    );
+
+    setActiveChoice({
+      options: models.map((m) => m.label),
+      onSelect: (chosen) => {
+        const model = models.find((m) => m.label === chosen);
+        if (model) {
+          setSelectedModel(model.id);
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `Model set to ${model.label}.`,
+          });
+        }
+      },
+    });
+    setCursor(0);
+    setMode("choice");
+  };
+
+  const runAgentLoop = async (userText: string) => {
+    if (!providerInstance) return;
+
+    const cwd = challengeDir ?? process.cwd();
+    const tools = [...createBuiltinTools(cwd), ...createWriteupTools(cwd), ...mcpBridge.current.getTools()];
+    const systemPrompt = buildSystemPrompt(cwd, mcpBridge.current.getPromptKeys());
+
+    setProcessingText("Thinking...");
+    setMode("processing");
+
+    try {
+      const events = agentLoop({
+        provider: providerInstance,
+        tools,
+        systemPrompt,
+        history: agentHistory.current,
+        userMessage: userText,
+        model: selectedModel ?? undefined,
+      });
+
+      for await (const event of events) {
+        handleAgentEvent(event);
+      }
+    } catch (err) {
+      pushMessages({
+        id: nextId(),
+        type: "system",
+        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setProcessingText("");
+      setMode("text");
+    }
+  };
+
+  const handleAgentEvent = (event: AgentEvent) => {
+    switch (event.type) {
+      case "text":
+        pushMessages({ id: nextId(), type: "assistant", text: event.text });
+        break;
+      case "tool_call":
+        setProcessingText(`Running ${event.name}...`);
+        pushMessages({
+          id: nextId(),
+          type: "tool_call",
+          toolName: event.name,
+          input: event.input,
+        });
+        break;
+      case "tool_result":
+        setProcessingText("Thinking...");
+        pushMessages({
+          id: nextId(),
+          type: "tool_result",
+          toolName: event.name,
+          output: event.output,
+          isError: event.isError,
+          durationMs: event.durationMs,
+        });
+        break;
+      case "error":
+        pushMessages({ id: nextId(), type: "system", text: `Error: ${event.message}` });
+        break;
+      case "turn_complete":
+        break;
+    }
+  };
+
+  const processUserInput = (text: string) => {
+    // Handle /model command
+    if (text.trim().toLowerCase() === "/model") {
+      handleModelCommand();
+      return;
+    }
+
+    // If no provider yet, prompt to pick one
+    if (!providerInstance) {
+      pushMessages(
+        { id: nextId(), type: "user", text },
+        { id: nextId(), type: "system", text: "No provider configured. Pick one first:" },
+      );
+      setActiveChoice({
+        options: PROVIDER_CHOICES,
+        onSelect: handleProviderChoice,
+      });
       setCursor(0);
       setMode("choice");
+      return;
     }
+
+    // Run agent loop
+    pushMessages({ id: nextId(), type: "user", text });
+    runAgentLoop(text);
   };
 
   const submitApiKey = (key: string) => {
     if (!pendingProvider) return;
 
     const info = PROVIDERS[pendingProvider];
-    pushMessages({ role: "user", text: maskKey(key) });
+    pushMessages({ id: nextId(), type: "user", text: maskKey(key) });
 
     setInput("");
-    setProcessingText(`Validating ${info.name} API key...`);
+    setProcessingText(`Initializing ${info.name}...`);
     setMode("processing");
 
-    // Simulate validation delay
-    setTimeout(() => {
-      setProvider(pendingProvider);
-      pushMessages({
-        role: "system",
-        text: `API key accepted. ${info.displayName} is now active.`,
+    createProvider(pendingProvider, key)
+      .then((instance) => {
+        setProvider(pendingProvider);
+        setProviderInstance(instance);
+        const models = PROVIDER_MODELS[pendingProvider];
+        if (models.length > 0) setSelectedModel(models[0].id);
+        pushMessages({
+          id: nextId(),
+          type: "system",
+          text: `${info.displayName} is ready. Start chatting lil bro!`,
+        });
+      })
+      .catch((err) => {
+        pushMessages({
+          id: nextId(),
+          type: "system",
+          text: `Failed to initialize ${info.name}: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      })
+      .finally(() => {
+        setPendingProvider(null);
+        setProcessingText("");
+        setMode("text");
       });
-      setPendingProvider(null);
-      setProcessingText("");
-      setMode("text");
-    }, 2000);
   };
 
   useInput((ch, key) => {
@@ -279,6 +642,23 @@ function App() {
 
     // Any other key resets the Ctrl+C state
     if (ctrlCPressed) setCtrlCPressed(false);
+
+    // Ctrl+O — toggle expand on last truncated message
+    if (key.ctrl && ch === "o") {
+      const truncatable = messages.filter(
+        (m) => (m.type === "assistant" || m.type === "tool_result") && isTruncatable(m),
+      );
+      if (truncatable.length > 0) {
+        const last = truncatable[truncatable.length - 1];
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(last.id)) next.delete(last.id);
+          else next.add(last.id);
+          return next;
+        });
+      }
+      return;
+    }
 
     // Processing mode — ignore all input
     if (mode === "processing") return;
@@ -298,9 +678,14 @@ function App() {
           setMode("text");
         } else {
           const chosen = activeChoice.options[cursor];
+          const onSelect = activeChoice.onSelect;
           setActiveChoice(null);
           setMode("text");
-          processUserInput(chosen);
+          if (onSelect) {
+            onSelect(chosen);
+          } else {
+            processUserInput(chosen);
+          }
         }
       }
       return;
@@ -336,36 +721,45 @@ function App() {
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Header provider={provider} />
+      <MemoHeader />
 
       <Box flexDirection="column" marginTop={1}>
-        {messages.map((msg, i) => (
-          <Message key={i} msg={msg} />
+        {messages.map((msg) => (
+          <MessageView key={msg.id} msg={msg} expanded={expandedIds.has(msg.id)} />
         ))}
       </Box>
 
       {mode === "choice" && activeChoice ? (
         <ChoiceSelector options={activeChoice.options} cursor={cursor} />
       ) : mode === "api-key" ? (
-        <InputBox value={input} placeholder="Paste your API key..." masked />
+        <InputBox value={input} placeholder="Paste your API key lil bro..." masked />
       ) : mode === "processing" ? (
         <ProcessingIndicator text={processingText} />
       ) : (
         <InputBox value={input} />
       )}
 
-      <Box marginTop={1}>
-        {ctrlCPressed ? (
-          <Text color="yellow">Press Ctrl+C again to exit</Text>
-        ) : (
-          <Text dimColor>ctrl+c to exit</Text>
+      <Box marginTop={1} justifyContent="space-between">
+        <Box>
+          {ctrlCPressed ? (
+            <Text color="yellow">Press Ctrl+C again to exit</Text>
+          ) : (
+            <Text dimColor>ctrl+c to exit · /model to switch · ctrl+o to expand</Text>
+          )}
+        </Box>
+        {selectedModel && (
+          <Box>
+            <Text dimColor>
+              {PROVIDER_MODELS[provider!]?.find((m) => m.id === selectedModel)?.label ?? selectedModel}
+            </Text>
+          </Box>
         )}
       </Box>
     </Box>
   );
 }
 
-export async function startApp() {
-  const instance = render(<App />, { exitOnCtrlC: false });
+export async function startApp(opts?: { challengeDir?: string }) {
+  const instance = render(<App challengeDir={opts?.challengeDir} />, { exitOnCtrlC: false });
   await instance.waitUntilExit();
 }
