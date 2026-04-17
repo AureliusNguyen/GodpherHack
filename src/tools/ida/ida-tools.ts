@@ -2,8 +2,7 @@ import type { ToolDefinition } from "../../agent/types.js";
 
 /**
  * Curated subset of IDA Pro MCP tools sent to the LLM.
- * Keeps token overhead manageable (~12 tools from 40+).
- * Focused on read/analysis operations most useful for CTF solving.
+ * Parameter names match the actual server API (batch-style: addrs, queries, patterns).
  */
 export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
@@ -12,9 +11,9 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Function name or hex address (e.g. 'main' or '0x401000')" },
+        addr: { type: "string", description: "Function name or hex address (e.g. 'main' or '0x401000')" },
       },
-      required: ["address"],
+      required: ["addr"],
     },
   },
   {
@@ -23,32 +22,52 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Start address or function name" },
-        count: { type: "number", description: "Number of instructions to disassemble (default: 50)" },
+        addr: { type: "string", description: "Function name or hex address" },
+        max_instructions: { type: "number", description: "Max instructions to return (default: 5000)" },
+        offset: { type: "number", description: "Skip first N instructions (default: 0)" },
       },
-      required: ["address"],
+      required: ["addr"],
     },
   },
   {
     name: "list_funcs",
-    description: "List all functions in the IDA database.",
+    description: "List functions in the IDA database. Supports filtering and pagination.",
     inputSchema: {
       type: "object",
       properties: {
-        offset: { type: "number", description: "Pagination offset (default: 0)" },
-        limit: { type: "number", description: "Max results (default: 1000)" },
+        queries: {
+          description: "Filter/pagination query. Can be a string filter or object with offset, count, filter.",
+          oneOf: [
+            { type: "string", description: "Filter string to match function names" },
+            {
+              type: "object",
+              properties: {
+                offset: { type: "number", description: "Starting index (default: 0)" },
+                count: { type: "number", description: "Max results (default: 50)" },
+                filter: { type: "string", description: "Filter string to match function names" },
+              },
+            },
+          ],
+        },
       },
+      required: ["queries"],
     },
   },
   {
     name: "lookup_funcs",
-    description: "Search for functions by name pattern.",
+    description: "Look up functions by name or address.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Search pattern to match against function names" },
+        queries: {
+          description: "Function name(s) or address(es) to look up. Can be a single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
       },
-      required: ["query"],
+      required: ["queries"],
     },
   },
   {
@@ -56,7 +75,10 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     description: "List all imported functions/symbols in the binary.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        offset: { type: "number", description: "Starting index (default: 0)" },
+        count: { type: "number", description: "Max results (0 = all imports)" },
+      },
     },
   },
   {
@@ -65,9 +87,22 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        offset: { type: "number", description: "Pagination offset (default: 0)" },
-        limit: { type: "number", description: "Max results (default: 1000)" },
+        queries: {
+          description: "Filter/pagination query.",
+          oneOf: [
+            { type: "string", description: "Filter string" },
+            {
+              type: "object",
+              properties: {
+                offset: { type: "number", description: "Starting index (default: 0)" },
+                count: { type: "number", description: "Max results (default: 50)" },
+                filter: { type: "string", description: "Filter string" },
+              },
+            },
+          ],
+        },
       },
+      required: ["queries"],
     },
   },
   {
@@ -76,9 +111,16 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Target address (e.g. '0x401000')" },
+        addrs: {
+          description: "Address(es) to find xrefs to. Single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        limit: { type: "number", description: "Max xrefs per address (default: 100)" },
       },
-      required: ["address"],
+      required: ["addrs"],
     },
   },
   {
@@ -87,31 +129,57 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Function name or address" },
+        addrs: {
+          description: "Function address(es) or name(s). Single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        limit: { type: "number", description: "Max callees per function (default: 200)" },
       },
-      required: ["address"],
+      required: ["addrs"],
     },
   },
   {
     name: "find",
-    description: "Search for a text string in the IDA database.",
+    description: "Search for strings, immediates, data references, or code references in the binary.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Text to search for" },
+        type: {
+          type: "string",
+          enum: ["string", "immediate", "data_ref", "code_ref"],
+          description: "Type of search to perform",
+        },
+        targets: {
+          description: "Search targets — strings, integers, or addresses. Single value or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        limit: { type: "number", description: "Max matches per target (default: 1000)" },
       },
-      required: ["query"],
+      required: ["type", "targets"],
     },
   },
   {
     name: "find_bytes",
-    description: "Search for a byte pattern in the binary.",
+    description: "Search for byte patterns in the binary (supports wildcards with ??).",
     inputSchema: {
       type: "object",
       properties: {
-        pattern: { type: "string", description: "Hex byte pattern (e.g. '48 89 5C 24' or '48 89 ?? 24')" },
+        patterns: {
+          description: "Byte pattern(s) to search for (e.g. '48 89 5C 24' or '48 89 ?? 24'). Single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        limit: { type: "number", description: "Max matches per pattern (default: 1000)" },
       },
-      required: ["pattern"],
+      required: ["patterns"],
     },
   },
   {
@@ -120,9 +188,15 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Address of the string" },
+        addrs: {
+          description: "Address(es) to read strings from. Single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
       },
-      required: ["address"],
+      required: ["addrs"],
     },
   },
   {
@@ -131,9 +205,16 @@ export const IDA_TOOL_DEFINITIONS: ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        address: { type: "string", description: "Function name or address" },
+        addrs: {
+          description: "Function address(es) or name(s). Single string or array.",
+          oneOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        max_blocks: { type: "number", description: "Max blocks per function (default: 1000)" },
       },
-      required: ["address"],
+      required: ["addrs"],
     },
   },
 ];

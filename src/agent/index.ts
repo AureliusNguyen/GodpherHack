@@ -12,3 +12,4 @@ export { agentLoop, type AgentLoopParams } from "./loop.js";
 export { createBuiltinTools } from "./tools.js";
 export { buildSystemPrompt } from "./system-prompt.js";
 export { McpToolBridge, type McpToolPack } from "./mcp-bridge.js";
+export { createWriteupTools } from "./writeup-tools.js";

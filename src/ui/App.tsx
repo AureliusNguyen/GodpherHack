@@ -14,6 +14,7 @@ import {
 import {
   agentLoop,
   createBuiltinTools,
+  createWriteupTools,
   buildSystemPrompt,
   McpToolBridge,
   type ProviderMessage,
@@ -330,7 +331,7 @@ function InputBox({
         </Text>
       ) : (
         <Text>
-          <Text color="gray">{placeholder || "Type a message..."}</Text>
+          <Text color="gray">{placeholder || "Type a message lil bro..."}</Text>
           <Text color="red" bold>
             _
           </Text>
@@ -366,7 +367,7 @@ function App({ challengeDir }: AppProps) {
     {
       id: nextId(),
       type: "system",
-      text: "Welcome lil bro! Select a provider to get started.",
+      text: "Wadup lil bro! Select a provider to get started.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -424,7 +425,7 @@ function App({ challengeDir }: AppProps) {
           pushMessages({
             id: nextId(),
             type: "system",
-            text: `${PROVIDERS[slug].displayName} is ready. Start chatting!`,
+            text: `${PROVIDERS[slug].displayName} is ready. Start chatting lil bro!`,
           });
         })
         .catch((err) => {
@@ -449,7 +450,7 @@ function App({ challengeDir }: AppProps) {
     pushMessages({
       id: nextId(),
       type: "system",
-      text: `${PROVIDERS[slug].displayName} selected. Enter your API key:`,
+      text: `${PROVIDERS[slug].displayName} selected. Enter your API key lil bro:`,
     });
     setInput("");
     setMode("api-key");
@@ -459,7 +460,7 @@ function App({ challengeDir }: AppProps) {
     if (!provider) {
       pushMessages(
         { id: nextId(), type: "user", text: "/model" },
-        { id: nextId(), type: "system", text: "No provider selected yet." },
+        { id: nextId(), type: "system", text: "No provider selected yet lil bro." },
       );
       return;
     }
@@ -468,14 +469,14 @@ function App({ challengeDir }: AppProps) {
     if (models.length === 0) {
       pushMessages(
         { id: nextId(), type: "user", text: "/model" },
-        { id: nextId(), type: "system", text: `No models available for ${PROVIDERS[provider].displayName} yet.` },
+        { id: nextId(), type: "system", text: `No models available for ${PROVIDERS[provider].displayName} yet lil bro.` },
       );
       return;
     }
 
     pushMessages(
       { id: nextId(), type: "user", text: "/model" },
-      { id: nextId(), type: "system", text: "Select a model:" },
+      { id: nextId(), type: "system", text: "Select a model lil bro:" },
     );
 
     setActiveChoice({
@@ -500,7 +501,7 @@ function App({ challengeDir }: AppProps) {
     if (!providerInstance) return;
 
     const cwd = challengeDir ?? process.cwd();
-    const tools = [...createBuiltinTools(cwd), ...mcpBridge.current.getTools()];
+    const tools = [...createBuiltinTools(cwd), ...createWriteupTools(cwd), ...mcpBridge.current.getTools()];
     const systemPrompt = buildSystemPrompt(cwd, mcpBridge.current.getPromptKeys());
 
     setProcessingText("Thinking...");
@@ -610,7 +611,7 @@ function App({ challengeDir }: AppProps) {
         pushMessages({
           id: nextId(),
           type: "system",
-          text: `${info.displayName} is ready. Start chatting!`,
+          text: `${info.displayName} is ready. Start chatting lil bro!`,
         });
       })
       .catch((err) => {
@@ -731,7 +732,7 @@ function App({ challengeDir }: AppProps) {
       {mode === "choice" && activeChoice ? (
         <ChoiceSelector options={activeChoice.options} cursor={cursor} />
       ) : mode === "api-key" ? (
-        <InputBox value={input} placeholder="Paste your API key..." masked />
+        <InputBox value={input} placeholder="Paste your API key lil bro..." masked />
       ) : mode === "processing" ? (
         <ProcessingIndicator text={processingText} />
       ) : (
