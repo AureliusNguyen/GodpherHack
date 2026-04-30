@@ -439,6 +439,11 @@ function App({ challengeDir }: AppProps) {
   useEffect(() => {
     const hubUrl = process.env.HUB_BASE_URL;
     if (!hubUrl) return;
+    // Wait for auth before connecting -- the WS handshake sends the
+    // stored JWT, and connecting before sign-in just gets us auth.error
+    // + close with no later reconnect. authedUser is non-null after
+    // sign-in or when a valid token was already on disk.
+    if (!authedUser) return;
     const client = new CollabClient(hubUrl, {
       onOpen: () => setCollabConnected(true),
       onClose: () => setCollabConnected(false),
@@ -450,7 +455,7 @@ function App({ challengeDir }: AppProps) {
       client.close();
       collabRef.current = null;
     };
-  }, []);
+  }, [authedUser]);
 
   const pushMessages = (...msgs: DisplayMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
