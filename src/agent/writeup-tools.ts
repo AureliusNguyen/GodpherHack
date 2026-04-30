@@ -210,7 +210,12 @@ function pushWriteupToHubTool(hub: HubClient, challengeDir: string): RegisteredT
 
 /** Create writeup tools. search + push go through Hub, save goes to local challengeDir. */
 export function createWriteupTools(challengeDir: string, hubUrl?: string): RegisteredTool[] {
-  const url = hubUrl ?? process.env.HUB_URL ?? "http://localhost:3000";
+  // HUB_BASE_URL is the canonical name (used by auth + collab). HUB_URL is
+  // accepted as a deprecated fallback so older shells still work.
+  const url = hubUrl
+    ?? process.env.HUB_BASE_URL
+    ?? process.env.HUB_URL
+    ?? "http://localhost:3000";
   const hub = new HubClient(url);
 
   return [

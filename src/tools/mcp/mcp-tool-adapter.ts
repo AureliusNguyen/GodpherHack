@@ -4,6 +4,20 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { ToolAdapter, ToolInfo, ToolResult, ToolOutput } from "../types.js";
 import type { McpServerConfig } from "./types.js";
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Race a promise against a timeout. Rejects with a labeled Error on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export class McpToolAdapter implements ToolAdapter {
   readonly name: string;
   private config: McpServerConfig;
@@ -16,12 +30,16 @@ export class McpToolAdapter implements ToolAdapter {
     this.config = config;
   }
 
+  private get timeoutMs(): number {
+    return this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
   async connect(): Promise<void> {
     if (this.connected) return;
 
     const transport = this.createTransport();
     this.client = new Client({ name: "godpherhack", version: "0.1.0" });
-    await this.client.connect(transport);
+    await withTimeout(this.client.connect(transport), this.timeoutMs, `${this.name}.connect`);
     this.connected = true;
   }
 
@@ -45,7 +63,11 @@ export class McpToolAdapter implements ToolAdapter {
     let cursor: string | undefined;
 
     do {
-      const result = await client.listTools(cursor ? { cursor } : undefined);
+      const result = await withTimeout(
+        client.listTools(cursor ? { cursor } : undefined),
+        this.timeoutMs,
+        `${this.name}.listTools`,
+      );
       for (const tool of result.tools) {
         tools.push({
           name: tool.name,
@@ -68,7 +90,11 @@ export class McpToolAdapter implements ToolAdapter {
     let success: boolean;
 
     try {
-      const result = await client.callTool({ name: toolName, arguments: args });
+      const result = await withTimeout(
+        client.callTool({ name: toolName, arguments: args }),
+        this.timeoutMs,
+        `${this.name}.${toolName}`,
+      );
 
       // Normalize MCP result to ToolOutput
       if ("content" in result && Array.isArray(result.content)) {

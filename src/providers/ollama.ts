@@ -25,12 +25,17 @@ export class OllamaProvider implements Provider {
   }
 
   async validateKey(_apiKey: string): Promise<boolean> {
-    // No API key for Ollama -- "key" is the base URL. Validate by probing /api/tags.
+    // No API key for Ollama -- "key" is the base URL. Probe /api/tags
+    // with a 1s timeout so a wrong port does not hang startup.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1000);
     try {
-      const res = await fetch(`${this.baseUrl}/api/tags`);
+      const res = await fetch(`${this.baseUrl}/api/tags`, { signal: controller.signal });
       return res.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

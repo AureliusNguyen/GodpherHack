@@ -9,7 +9,6 @@ import type {
 import { FileCache, cacheKey } from "./cache.js";
 import { readStoredToken } from "./auth-client.js";
 
-const ANALYSIS_TTL = 1000 * 60 * 60;       // 1 hour for LLM categorization
 const RETRIEVAL_TTL = 1000 * 60 * 60 * 24; // 24 hours for RAG results
 
 export class HubClient {
@@ -33,24 +32,16 @@ export class HubClient {
   }
 
   async analyze(req: AnalyzeRequest): Promise<AnalyzeResponse> {
-    const { indexGeneration, analyzerVersion } = await this.health();
+    const { indexGeneration } = await this.health();
 
-    // Analysis cache: keyed by challenge + analyzerVersion (invalidates on analyzer upgrade)
-    const analysisKey = cacheKey("analysis", req.challenge, analyzerVersion);
-
-    // Retrieval cache: keyed by challenge + topK + indexGeneration (invalidates on RAG changes)
+    // One cache, keyed on indexGeneration. The earlier two-layer cache
+    // could return stale topWriteups after a new solve was indexed
+    // because the analysis-only entry persisted across generation bumps.
     const retrievalKey = cacheKey("retrieval", req, indexGeneration);
-    const cachedRetrieval = await this.cache.get<AnalyzeResponse>(retrievalKey);
-
-    // Retrieval layer covers both analysis + writeups — return if valid
-    if (cachedRetrieval) return cachedRetrieval;
-
-    // Analysis-only cache: same analysis but writeups may have changed
-    const cachedAnalysis = await this.cache.get<AnalyzeResponse>(analysisKey);
-    if (cachedAnalysis) return cachedAnalysis;
+    const cached = await this.cache.get<AnalyzeResponse>(retrievalKey);
+    if (cached) return cached;
 
     const res = await this.post<AnalyzeResponse>("/challenges/analyze", req);
-    await this.cache.set(analysisKey, res, ANALYSIS_TTL);
     await this.cache.set(retrievalKey, res, RETRIEVAL_TTL);
     return res;
   }

@@ -29,16 +29,23 @@ function runQemu(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
+
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      action();
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       if (stdout.length < MAX_OUTPUT_BYTES) stdout += chunk.toString("utf-8");
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       if (stderr.length < MAX_OUTPUT_BYTES) stderr += chunk.toString("utf-8");
     });
 
@@ -46,20 +53,28 @@ function runQemu(
       clearTimeout(timer);
       // ENOENT = qemu-<arch> not installed
       const e = err as NodeJS.ErrnoException;
-      if (e.code === "ENOENT") {
-        reject(new Error(`${cmd} is not installed. Install qemu-user (or qemu-user-static) to run ${arch} binaries.`));
-      } else {
-        reject(err);
-      }
+      settle(() => {
+        if (e.code === "ENOENT") {
+          reject(new Error(`${cmd} is not installed. Install qemu-user (or qemu-user-static) to run ${arch} binaries.`));
+        } else {
+          reject(err);
+        }
+      });
     });
 
     child.on("close", (exitCode, signal) => {
       clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode, signal, timedOut });
+      settle(() => resolve({ stdout, stderr, exitCode, signal, timedOut }));
     });
 
-    if (stdinInput) child.stdin.write(stdinInput);
-    child.stdin.end();
+    // stdin can be null when spawn fails synchronously (ENOENT etc.).
+    // Wrap in try so we don't double-reject via 'error' + a thrown TypeError.
+    try {
+      if (stdinInput && child.stdin) child.stdin.write(stdinInput);
+      child.stdin?.end();
+    } catch {
+      // 'error' will fire and reject with the real cause.
+    }
   });
 }
 
@@ -103,6 +118,12 @@ function qemuRunTool(challengeDir: string): RegisteredTool {
 
       if (!SUPPORTED_ARCHES.includes(arch)) {
         return `Error: unsupported arch "${arch}". Supported: ${SUPPORTED_ARCHES.join(", ")}.`;
+      }
+
+      // Reject leading dash so the binaryPath cannot be interpreted as a
+      // qemu flag (e.g. -L, -strace).
+      if (binaryPathArg.startsWith("-")) {
+        return "Error: binaryPath cannot start with '-'";
       }
 
       let binaryPath: string;

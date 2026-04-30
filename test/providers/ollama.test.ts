@@ -27,7 +27,8 @@ describe("OllamaProvider", () => {
     mockJson({ models: [] });
     const provider = new OllamaProvider(BASE);
     expect(await provider.validateKey("")).toBe(true);
-    expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/tags`);
+    // Now passes an AbortSignal for the 1s timeout; assert on URL only.
+    expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/tags`, expect.objectContaining({ signal: expect.anything() }));
   });
 
   it("validateKey returns false when probe fails", async () => {
