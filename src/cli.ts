@@ -21,4 +21,30 @@ program
     await startHub({ port: Number(opts.port) });
   });
 
+const authCmd = program.command("auth").description("Manage authentication with the Hub");
+
+authCmd
+  .command("login")
+  .description("Sign in to the Hub via GitHub OAuth")
+  .option("--hub <url>", "Hub base URL", process.env.HUB_BASE_URL ?? "http://localhost:3000")
+  .action(async (opts) => {
+    const { loginWithGithub } = await import("./client/auth-client.js");
+    try {
+      await loginWithGithub(opts.hub);
+      console.log(`Logged in to ${opts.hub}`);
+    } catch (err) {
+      console.error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+authCmd
+  .command("logout")
+  .description("Clear stored credentials")
+  .action(async () => {
+    const { logout } = await import("./client/auth-client.js");
+    logout();
+    console.log("Logged out.");
+  });
+
 program.parse();

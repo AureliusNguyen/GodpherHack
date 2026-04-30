@@ -7,6 +7,7 @@ import type {
   SolveSubmitResponse,
 } from "../shared/api-types.js";
 import { FileCache, cacheKey } from "./cache.js";
+import { readStoredToken } from "./auth-client.js";
 
 const ANALYSIS_TTL = 1000 * 60 * 60;       // 1 hour for LLM categorization
 const RETRIEVAL_TTL = 1000 * 60 * 60 * 24; // 24 hours for RAG results
@@ -18,6 +19,11 @@ export class HubClient {
   constructor(baseUrl = "http://localhost:3000") {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.cache = new FileCache();
+  }
+
+  private authHeaders(): Record<string, string> {
+    const token = readStoredToken(this.baseUrl);
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
   async health(): Promise<{ status: string; analyzerVersion: string; indexGeneration: number }> {
@@ -62,6 +68,7 @@ export class HubClient {
   async deleteSolve(id: string): Promise<{ deleted: boolean; id: string }> {
     const res = await fetch(`${this.baseUrl}/solves/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: this.authHeaders(),
     });
 
     if (!res.ok) {
@@ -75,7 +82,10 @@ export class HubClient {
   private async post<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...this.authHeaders(),
+      },
       body: JSON.stringify(body),
     });
 

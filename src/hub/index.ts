@@ -3,6 +3,7 @@ import { InMemoryWriteupRepository } from "./repository/in-memory.js";
 import { PineconeWriteupRepository } from "./repository/pinecone.js";
 import type { WriteupRepository } from "./repository/types.js";
 import { ChallengeAnalyzer } from "./services/analyzer.js";
+import { AuthService, authConfigFromEnv } from "./services/auth.js";
 import { createHub } from "./server.js";
 
 export interface HubOptions {
@@ -16,7 +17,7 @@ function createRepository(): WriteupRepository {
     console.log(`[hub] Using Pinecone repository (index: ${indexName})`);
     return new PineconeWriteupRepository({ apiKey: pineconeKey, indexName });
   }
-  console.log("[hub] PINECONE_API_KEY not set — using in-memory repository (data will not persist)");
+  console.log("[hub] PINECONE_API_KEY not set -- using in-memory repository (data will not persist)");
   return new InMemoryWriteupRepository();
 }
 
@@ -24,7 +25,15 @@ export async function startHub(opts: HubOptions) {
   const repository = createRepository();
   const analyzer = new ChallengeAnalyzer(null); // no LLM provider yet
 
-  const app = createHub({ repository, analyzer });
+  const authConfig = authConfigFromEnv();
+  const auth = authConfig ? new AuthService(authConfig) : undefined;
+  if (auth) {
+    console.log("[hub] Auth enabled (GitHub OAuth + JWT)");
+  } else {
+    console.log("[hub] Auth disabled -- set JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET to enable");
+  }
+
+  const app = createHub({ repository, analyzer, auth });
 
   console.log(`[hub] Starting Hub API on port ${opts.port}...`);
 
