@@ -7,7 +7,7 @@ const BASH_TIMEOUT_MS = 30_000;
 const READ_FILE_DEFAULT_LIMIT = 2000;
 
 /** Resolve a path and ensure it stays within the workspace root */
-function safePath(cwd: string, inputPath: string): string {
+export function safePath(cwd: string, inputPath: string): string {
   const resolved = resolve(cwd, inputPath);
   const normalizedCwd = resolve(cwd);
   if (!resolved.startsWith(normalizedCwd + sep) && resolved !== normalizedCwd) {

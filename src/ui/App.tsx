@@ -16,6 +16,7 @@ import {
   agentLoop,
   createBuiltinTools,
   createWriteupTools,
+  createQemuTools,
   buildSystemPrompt,
   McpToolBridge,
   type ProviderMessage,
@@ -516,8 +517,13 @@ function App({ challengeDir }: AppProps) {
     if (!providerInstance) return;
 
     const cwd = challengeDir ?? process.cwd();
-    const tools = [...createBuiltinTools(cwd), ...createWriteupTools(cwd), ...mcpBridge.current.getTools()];
-    const systemPrompt = buildSystemPrompt(cwd, mcpBridge.current.getPromptKeys());
+    const tools = [
+      ...createBuiltinTools(cwd),
+      ...createWriteupTools(cwd),
+      ...createQemuTools(cwd),
+      ...mcpBridge.current.getTools(),
+    ];
+    const systemPrompt = buildSystemPrompt(cwd, [...mcpBridge.current.getPromptKeys(), "qemu"]);
     const runId = `run_${Date.now().toString(36)}`;
 
     setProcessingText("Thinking...");
