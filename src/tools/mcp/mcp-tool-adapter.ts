@@ -6,10 +6,18 @@ import type { McpServerConfig } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Race a promise against a timeout. Rejects with a labeled Error on timeout. */
+/** Distinguishable from regular SDK errors so callers can mark the adapter dead. */
+export class TimeoutError extends Error {
+  constructor(label: string, ms: number) {
+    super(`${label} timed out after ${ms}ms`);
+    this.name = "TimeoutError";
+  }
+}
+
+/** Race a promise against a timeout. Rejects with TimeoutError on timeout. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    const timer = setTimeout(() => reject(new TimeoutError(label, ms)), ms);
     timer.unref?.();
     promise.then(
       (v) => { clearTimeout(timer); resolve(v); },
@@ -67,6 +75,22 @@ export class McpToolAdapter implements ToolAdapter {
     return this.connected;
   }
 
+  /**
+   * Tear down a wedged client without awaiting (timeout paths can't
+   * trust the underlying SDK to respond). After this, isConnected()
+   * returns false so the bridge will reconnect on the next call.
+   */
+  private markDead(): void {
+    const client = this.client;
+    this.client = null;
+    this.connected = false;
+    this.cachedTools = null;
+    if (client) {
+      // Fire and forget; the timeout already proved the wire is unhappy.
+      client.close().catch(() => { /* already gone */ });
+    }
+  }
+
   async listTools(): Promise<ToolInfo[]> {
     if (this.cachedTools) return this.cachedTools;
     const client = this.getClient();
@@ -74,21 +98,29 @@ export class McpToolAdapter implements ToolAdapter {
     const tools: ToolInfo[] = [];
     let cursor: string | undefined;
 
-    do {
-      const result = await withTimeout(
-        client.listTools(cursor ? { cursor } : undefined),
-        this.timeoutMs,
-        `${this.name}.listTools`,
-      );
-      for (const tool of result.tools) {
-        tools.push({
-          name: tool.name,
-          description: tool.description ?? "",
-          inputSchema: tool.inputSchema as Record<string, unknown>,
-        });
-      }
-      cursor = result.nextCursor;
-    } while (cursor);
+    try {
+      do {
+        const result = await withTimeout(
+          client.listTools(cursor ? { cursor } : undefined),
+          this.timeoutMs,
+          `${this.name}.listTools`,
+        );
+        for (const tool of result.tools) {
+          tools.push({
+            name: tool.name,
+            description: tool.description ?? "",
+            inputSchema: tool.inputSchema as Record<string, unknown>,
+          });
+        }
+        cursor = result.nextCursor;
+      } while (cursor);
+    } catch (err) {
+      // A timeout means the wire is wedged; reset so the bridge
+      // reconnects next call. listTools is allowed to throw, so
+      // re-raise after cleanup.
+      if (err instanceof TimeoutError) this.markDead();
+      throw err;
+    }
 
     this.cachedTools = tools;
     return tools;
@@ -131,6 +163,11 @@ export class McpToolAdapter implements ToolAdapter {
         success = true;
       }
     } catch (err) {
+      // Timeout means the cached client is unusable; tear it down so
+      // the next bridge call hits getAdapter() -> isConnected() ===
+      // false -> fresh adapter. Other errors (tool-level failure) are
+      // returned as success: false but leave the connection alone.
+      if (err instanceof TimeoutError) this.markDead();
       output = {
         type: "error",
         content: err instanceof Error ? err.message : String(err),

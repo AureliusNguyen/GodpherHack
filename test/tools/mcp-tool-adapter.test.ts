@@ -181,6 +181,36 @@ describe("McpToolAdapter", () => {
       const adapter = new McpToolAdapter(stdioConfig);
       await expect(adapter.invoke("tool", {})).rejects.toThrow("not connected");
     });
+
+    it("invoke timeout marks the adapter dead so the bridge will reconnect", async () => {
+      // Hang forever so withTimeout fires.
+      __mockClient.callTool.mockImplementationOnce(() => new Promise(() => {}));
+
+      const adapter = new McpToolAdapter({ ...stdioConfig, timeoutMs: 20 });
+      await adapter.connect();
+      expect(adapter.isConnected()).toBe(true);
+
+      const result = await adapter.invoke("hangs_forever", {});
+
+      expect(result.success).toBe(false);
+      expect(result.output.content).toMatch(/timed out/);
+      // The contract: after a timeout, isConnected() must report false
+      // so McpToolBridge.getAdapter() builds a fresh adapter next call.
+      expect(adapter.isConnected()).toBe(false);
+      expect(__mockClient.close).toHaveBeenCalled();
+    });
+
+    it("non-timeout errors leave the connection intact", async () => {
+      __mockClient.callTool.mockRejectedValueOnce(new Error("tool not found"));
+
+      const adapter = new McpToolAdapter(stdioConfig);
+      await adapter.connect();
+
+      const result = await adapter.invoke("missing", {});
+      expect(result.success).toBe(false);
+      // Tool-level errors should NOT tear down the connection.
+      expect(adapter.isConnected()).toBe(true);
+    });
   });
 
   describe("transport selection", () => {
