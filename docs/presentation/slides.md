@@ -18,16 +18,6 @@
 
 - GitHub OAuth + JWT for Hub auth. No password DB, no per-user keys
   to manage. Every CTF team has GitHub accounts already.
-- Anonymous Hub mode requires explicit `ALLOW_ANONYMOUS_HUB=true` --
-  the Hub refuses to start without either real auth config or that
-  explicit opt-in. Removes the "forgot to set JWT_SECRET, oops it's
-  open" failure mode.
-- OAuth redirect restricted to loopback URLs to prevent JWT
-  exfiltration via attacker-controlled redirects.
-- Path traversal blocked at the tool boundary (`safePath()`).
-- Iterated review: 5 rounds of code review caught and fixed real
-  bugs (poisoned MCP retry, OAuth open redirect, presence leak on
-  re-auth, timeout cleanup hangs, stale Hub cache).
 
 ## Cloud Computing
 
@@ -36,10 +26,6 @@
 - **Of the 408 MB shipped, 205 kB is application code I authored.**
   That's 0.05% of the image. The other 99.95% is Debian base, Node
   runtime, and well-known npm packages.
-  - Caveat to expect in Q&A: "those packages are still your supply
-    chain." True; mitigation is `npm audit` + locked dependencies.
-    The framing is "audit surface for custom logic," not "trusted
-    base ignored."
 - Kubernetes manifests ship production-ready: 2 replicas with
   HorizontalPodAutoscaler 2 - 10, hardened pod spec (non-root,
   read-only FS, dropped caps), Ingress with WebSocket upgrade.
@@ -49,7 +35,7 @@
   pod; Redis Pub/Sub is the swap for multi-pod. The interface stays
   the same.
 - Walk the Grafana dashboard panel by panel: traffic shape (5:2:1),
-  p95 latency under load (`/health` 460us framework floor vs
+  p95 latency under load (`/health` 460microsecs framework floor vs
   `/challenges/analyze` 6ms RAG cost -- 13x gap is real work, not
   noise), zero 5xx, all 200s. Full script in `02-grafana.md`.
 
