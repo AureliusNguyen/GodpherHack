@@ -11,6 +11,10 @@ import type { Provider } from "../providers/types.js";
 const MAX_ITERATIONS = 20;
 const MAX_TOOL_OUTPUT_LINES = 200;
 
+export interface CollabEmitter {
+  emitAgentEvent(runId: string, event: Record<string, unknown>): void;
+}
+
 export interface AgentLoopParams {
   provider: Provider;
   tools: RegisteredTool[];
@@ -18,6 +22,10 @@ export interface AgentLoopParams {
   history: ProviderMessage[];
   userMessage: string;
   model?: string;
+  /** Optional run id used to thread events through CollabEmitter. */
+  runId?: string;
+  /** Optional collab client; when present, every yielded event is broadcast. */
+  collab?: CollabEmitter;
 }
 
 function truncateToolOutput(output: string): string {
@@ -31,10 +39,17 @@ function truncateToolOutput(output: string): string {
  * Mutates the provided history array in place (caller keeps a reference).
  */
 export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentEvent> {
-  const { provider, tools, systemPrompt, history, userMessage, model } = params;
+  const { provider, tools, systemPrompt, history, userMessage, model, runId, collab } = params;
+
+  function emit(event: AgentEvent): AgentEvent {
+    if (collab && runId) {
+      collab.emitAgentEvent(runId, event as unknown as Record<string, unknown>);
+    }
+    return event;
+  }
 
   if (!provider.chatWithTools) {
-    yield { type: "error", message: "Provider does not support chatWithTools (agentic tool use)" };
+    yield emit({ type: "error", message: "Provider does not support chatWithTools (agentic tool use)" });
     return;
   }
 
@@ -55,14 +70,14 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
         tools: tools.map((t) => t.definition),
       });
     } catch (err) {
-      yield { type: "error", message: err instanceof Error ? err.message : String(err) };
+      yield emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
       return;
     }
 
     // Yield text blocks
     for (const block of response.content) {
       if (block.type === "text" && block.text.trim()) {
-        yield { type: "text", text: block.text };
+        yield emit({ type: "text", text: block.text });
       }
     }
 
@@ -70,7 +85,7 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
     if (response.stopReason !== "tool_use") {
       // Append assistant message to history
       history.push({ role: "assistant", content: response.content });
-      yield { type: "turn_complete" };
+      yield emit({ type: "turn_complete" });
       return;
     }
 
@@ -80,9 +95,9 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
     );
 
     if (toolUseBlocks.length === 0) {
-      // stop_reason was tool_use but no tool_use blocks — shouldn't happen
+      // stop_reason was tool_use but no tool_use blocks -- shouldn't happen
       history.push({ role: "assistant", content: response.content });
-      yield { type: "turn_complete" };
+      yield emit({ type: "turn_complete" });
       return;
     }
 
@@ -93,7 +108,7 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
     const toolResults: ToolResultContent[] = [];
 
     for (const block of toolUseBlocks) {
-      yield { type: "tool_call", id: block.id, name: block.name, input: block.input };
+      yield emit({ type: "tool_call", id: block.id, name: block.name, input: block.input });
 
       const tool = toolMap.get(block.name);
       const start = Date.now();
@@ -101,7 +116,7 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
       if (!tool) {
         const output = `Error: unknown tool "${block.name}"`;
         toolResults.push({ type: "tool_result", toolUseId: block.id, content: output, isError: true });
-        yield { type: "tool_result", id: block.id, name: block.name, output, isError: true, durationMs: Date.now() - start };
+        yield emit({ type: "tool_result", id: block.id, name: block.name, output, isError: true, durationMs: Date.now() - start });
         continue;
       }
 
@@ -110,11 +125,11 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
         const output = truncateToolOutput(rawOutput);
         const isError = output.startsWith("Error:");
         toolResults.push({ type: "tool_result", toolUseId: block.id, content: output, isError });
-        yield { type: "tool_result", id: block.id, name: block.name, output, isError, durationMs: Date.now() - start };
+        yield emit({ type: "tool_result", id: block.id, name: block.name, output, isError, durationMs: Date.now() - start });
       } catch (err) {
         const output = `Error: ${err instanceof Error ? err.message : String(err)}`;
         toolResults.push({ type: "tool_result", toolUseId: block.id, content: output, isError: true });
-        yield { type: "tool_result", id: block.id, name: block.name, output, isError: true, durationMs: Date.now() - start };
+        yield emit({ type: "tool_result", id: block.id, name: block.name, output, isError: true, durationMs: Date.now() - start });
       }
     }
 
@@ -123,5 +138,5 @@ export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentE
   }
 
   // Exceeded max iterations
-  yield { type: "error", message: `Agent reached maximum iterations (${MAX_ITERATIONS})` };
+  yield emit({ type: "error", message: `Agent reached maximum iterations (${MAX_ITERATIONS})` });
 }

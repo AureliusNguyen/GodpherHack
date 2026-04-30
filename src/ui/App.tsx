@@ -22,6 +22,8 @@ import {
   type AgentEvent,
 } from "../agent/index.js";
 import { GHIDRA_TOOL_DEFINITIONS, createGhidraAdapter, IDA_TOOL_DEFINITIONS, createIdaAdapter } from "../tools/index.js";
+import { CollabClient } from "../client/collab-client.js";
+import type { PresenceEntry } from "../hub/services/collab-hub.js";
 
 // --- Display message types (stable IDs for React keys) ---
 
@@ -388,6 +390,27 @@ function App({ challengeDir }: AppProps) {
   // Expanded message IDs (for ctrl+o toggle)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
+  // Collab: connects on mount when HUB_BASE_URL is set, disconnects on unmount.
+  const collabRef = useRef<CollabClient | null>(null);
+  const [collabUsers, setCollabUsers] = useState<PresenceEntry[]>([]);
+  const [collabConnected, setCollabConnected] = useState(false);
+
+  useEffect(() => {
+    const hubUrl = process.env.HUB_BASE_URL;
+    if (!hubUrl) return;
+    const client = new CollabClient(hubUrl, {
+      onOpen: () => setCollabConnected(true),
+      onClose: () => setCollabConnected(false),
+      onPresence: (users) => setCollabUsers(users),
+    });
+    collabRef.current = client;
+    client.connect();
+    return () => {
+      client.close();
+      collabRef.current = null;
+    };
+  }, []);
+
   const pushMessages = (...msgs: DisplayMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
   };
@@ -495,9 +518,11 @@ function App({ challengeDir }: AppProps) {
     const cwd = challengeDir ?? process.cwd();
     const tools = [...createBuiltinTools(cwd), ...createWriteupTools(cwd), ...mcpBridge.current.getTools()];
     const systemPrompt = buildSystemPrompt(cwd, mcpBridge.current.getPromptKeys());
+    const runId = `run_${Date.now().toString(36)}`;
 
     setProcessingText("Thinking...");
     setMode("processing");
+    collabRef.current?.setActivity(`solving in ${cwd.split("/").slice(-1)[0]}`, cwd.split("/").slice(-1)[0]);
 
     try {
       const events = agentLoop({
@@ -507,6 +532,8 @@ function App({ challengeDir }: AppProps) {
         history: agentHistory.current,
         userMessage: userText,
         model: selectedModel ?? undefined,
+        runId,
+        collab: collabRef.current ?? undefined,
       });
 
       for await (const event of events) {
@@ -521,6 +548,7 @@ function App({ challengeDir }: AppProps) {
     } finally {
       setProcessingText("");
       setMode("text");
+      collabRef.current?.setActivity("idle");
     }
   };
 
@@ -736,7 +764,7 @@ function App({ challengeDir }: AppProps) {
           {ctrlCPressed ? (
             <Text color="yellow">Press Ctrl+C again to exit</Text>
           ) : (
-            <Text dimColor>ctrl+c to exit · /model to switch · ctrl+o to expand</Text>
+            <Text dimColor>ctrl+c to exit . /model to switch . ctrl+o to expand</Text>
           )}
         </Box>
         {selectedModel && (
@@ -747,6 +775,24 @@ function App({ challengeDir }: AppProps) {
           </Box>
         )}
       </Box>
+
+      {process.env.HUB_BASE_URL && (
+        <Box>
+          <Text dimColor>
+            collab: {collabConnected ? `connected (${collabUsers.length} online` : "disconnected"}
+            {collabConnected && collabUsers.length > 0 && (
+              <>
+                {": "}
+                {collabUsers
+                  .slice(0, 5)
+                  .map((u) => `${u.login}/${u.activity}`)
+                  .join(", ")}
+              </>
+            )}
+            {collabConnected && ")"}
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

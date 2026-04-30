@@ -1,9 +1,11 @@
+import type { Server as HttpServer } from "node:http";
 import { serve } from "@hono/node-server";
 import { InMemoryWriteupRepository } from "./repository/in-memory.js";
 import { PineconeWriteupRepository } from "./repository/pinecone.js";
 import type { WriteupRepository } from "./repository/types.js";
 import { ChallengeAnalyzer } from "./services/analyzer.js";
 import { AuthService, authConfigFromEnv } from "./services/auth.js";
+import { CollabHub } from "./services/collab-hub.js";
 import { createHub } from "./server.js";
 
 export interface HubOptions {
@@ -37,9 +39,13 @@ export async function startHub(opts: HubOptions) {
 
   console.log(`[hub] Starting Hub API on port ${opts.port}...`);
 
-  serve({ fetch: app.fetch, port: opts.port }, (info) => {
+  const server = serve({ fetch: app.fetch, port: opts.port }, (info) => {
     console.log(`[hub] Hub API listening on http://localhost:${info.port}`);
-  });
+  }) as unknown as HttpServer;
+
+  // Attach the collab WebSocket to the same http server (path /ws/collab)
+  new CollabHub(server, auth ?? null);
+  console.log("[hub] Collab WebSocket on ws://localhost:" + opts.port + "/ws/collab");
 }
 
 export { createHub } from "./server.js";
