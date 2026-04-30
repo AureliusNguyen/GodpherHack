@@ -31,8 +31,17 @@ export async function startHub(opts: HubOptions) {
   const auth = authConfig ? new AuthService(authConfig) : undefined;
   if (auth) {
     console.log("[hub] Auth enabled (GitHub OAuth + JWT)");
+  } else if (process.env.ALLOW_ANONYMOUS_HUB === "true") {
+    console.warn(
+      "[hub] WARNING: anonymous mode -- /solves and /challenges/* are unauthenticated. " +
+      "Set JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET to enable auth.",
+    );
   } else {
-    console.log("[hub] Auth disabled -- set JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET to enable");
+    console.error(
+      "[hub] Auth not configured. Set JWT_SECRET + GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET, " +
+      "or set ALLOW_ANONYMOUS_HUB=true to opt into an open Hub. Refusing to start.",
+    );
+    process.exit(1);
   }
 
   const app = createHub({ repository, analyzer, auth });

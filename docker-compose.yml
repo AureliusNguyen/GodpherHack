@@ -25,6 +25,8 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       HUB_BASE_URL: ${HUB_BASE_URL:-http://localhost:3000}
+      # Set to "true" to run an open Hub (no auth). Refused otherwise.
+      ALLOW_ANONYMOUS_HUB: ${ALLOW_ANONYMOUS_HUB:-}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 15s

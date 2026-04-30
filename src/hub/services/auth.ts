@@ -1,10 +1,20 @@
 import { webcrypto } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
+import { z } from "zod";
 
 // jose's webapi build requires globalThis.crypto. Node 19+ has it; polyfill for Node 18.
+// configurable: true so other modules can install their own polyfill without throwing.
 if (typeof globalThis.crypto === "undefined") {
-  Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: false });
+  Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true });
 }
+
+const UserClaimsSchema = z.object({
+  sub: z.string().min(1),
+  login: z.string().min(1),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  avatarUrl: z.string().optional(),
+});
 
 export interface AuthConfig {
   jwtSecret: string;
@@ -66,14 +76,13 @@ export class AuthService {
 
   async verify(token: string): Promise<UserClaims> {
     const { payload } = await jwtVerify(token, this.secret);
-    if (!payload.sub) throw new Error("Token missing sub");
-    return {
+    return UserClaimsSchema.parse({
       sub: payload.sub,
-      login: (payload.login as string) ?? "",
-      name: payload.name as string | undefined,
-      email: payload.email as string | undefined,
-      avatarUrl: payload.avatarUrl as string | undefined,
-    };
+      login: payload.login,
+      name: payload.name,
+      email: payload.email,
+      avatarUrl: payload.avatarUrl,
+    });
   }
 
   async exchangeGithubCode(code: string): Promise<GithubUser> {

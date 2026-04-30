@@ -2,10 +2,27 @@ import { Hono } from "hono";
 import type { AuthService } from "../services/auth.js";
 
 const STATE_TTL_MS = 5 * 60 * 1000;
+const STATE_GC_INTERVAL_MS = 60_000;
+const STATE_MAX_ENTRIES = 1000;
 
 interface PendingState {
   redirectUri: string;
   expiresAt: number;
+}
+
+/**
+ * Restrict OAuth redirect targets to loopback only. The CLI uses an
+ * ephemeral 127.0.0.1 listener, so anything else is an attacker
+ * trying to exfiltrate the JWT we are about to mint.
+ */
+function isAllowedRedirect(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:") return false;
+    return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  } catch {
+    return false;
+  }
 }
 
 export function authRoutes(auth: AuthService) {
@@ -20,10 +37,24 @@ export function authRoutes(auth: AuthService) {
     for (const [k, v] of states) if (v.expiresAt < now) states.delete(k);
   }
 
+  // Run GC on a timer instead of only on /auth/github so an idle Hub
+  // does not accumulate expired entries forever.
+  const gcTimer = setInterval(gcStates, STATE_GC_INTERVAL_MS);
+  gcTimer.unref?.();
+
   app.get("/auth/github", (c) => {
-    gcStates();
+    if (states.size >= STATE_MAX_ENTRIES) {
+      gcStates();
+      if (states.size >= STATE_MAX_ENTRIES) {
+        return c.json({ error: "Too many in-flight logins" }, 429);
+      }
+    }
+
     const redirect = c.req.query("redirect") ?? "";
     if (!redirect) return c.json({ error: "Missing redirect query param" }, 400);
+    if (!isAllowedRedirect(redirect)) {
+      return c.json({ error: "redirect must be a loopback http URL" }, 400);
+    }
 
     const state = crypto.randomUUID();
     states.set(state, { redirectUri: redirect, expiresAt: Date.now() + STATE_TTL_MS });

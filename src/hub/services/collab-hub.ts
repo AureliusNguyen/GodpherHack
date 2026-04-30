@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import type { AuthService, UserClaims } from "./auth.js";
 
@@ -22,6 +23,7 @@ export interface FeedEvent {
 interface Connection {
   ws: WebSocket;
   user: UserClaims | null;
+  authTimer: NodeJS.Timeout | null;
 }
 
 const FEED_BUFFER = 100;
@@ -60,12 +62,21 @@ export class CollabHub {
   }
 
   close(): void {
-    if (this.gcTimer) clearInterval(this.gcTimer);
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+    for (const conn of this.connections.values()) {
+      if (conn.authTimer) clearTimeout(conn.authTimer);
+      try { conn.ws.terminate(); } catch { /* already gone */ }
+    }
+    this.connections.clear();
+    this.presence.clear();
     this.wss.close();
   }
 
   private onConnection(ws: WebSocket): void {
-    const conn: Connection = { ws, user: null };
+    const conn: Connection = { ws, user: null, authTimer: null };
     this.connections.set(ws, conn);
 
     ws.on("message", async (data) => {
@@ -81,13 +92,17 @@ export class CollabHub {
     ws.on("close", () => this.onClose(conn));
     ws.on("error", () => this.onClose(conn));
 
-    // 30s to authenticate, else close
-    setTimeout(() => {
+    // 30s to authenticate, else close. Timer is captured so onClose
+    // and successful auth can clear it -- otherwise short-lived
+    // connections leak closures + timers per disconnect.
+    conn.authTimer = setTimeout(() => {
+      conn.authTimer = null;
       if (!conn.user && ws.readyState === ws.OPEN) {
         this.send(ws, { type: "auth.error", error: "Auth timeout" });
         ws.close();
       }
-    }, 30_000).unref?.();
+    }, 30_000);
+    conn.authTimer.unref?.();
   }
 
   private async onMessage(conn: Connection, msg: Record<string, unknown>): Promise<void> {
@@ -96,21 +111,25 @@ export class CollabHub {
     if (type === "auth") {
       const token = msg.token as string;
       if (!this.auth) {
-        // Auth disabled -- accept anonymous connection with synthetic identity
-        conn.user = { sub: "anon", login: "anon" };
-        this.send(conn.ws, { type: "auth.ok", user: conn.user });
-        this.send(conn.ws, { type: "feed.snapshot", events: this.feed });
-        return;
+        // Anonymous mode -- per-connection synthetic id so multiple anon
+        // clients don't collide on the same presence key.
+        const id = `anon_${randomUUID().slice(0, 8)}`;
+        conn.user = { sub: id, login: id };
+      } else {
+        try {
+          conn.user = await this.auth.verify(token);
+        } catch (err) {
+          this.send(conn.ws, {
+            type: "auth.error",
+            error: err instanceof Error ? err.message : "Invalid token",
+          });
+          conn.ws.close();
+          return;
+        }
       }
-      try {
-        conn.user = await this.auth.verify(token);
-      } catch (err) {
-        this.send(conn.ws, {
-          type: "auth.error",
-          error: err instanceof Error ? err.message : "Invalid token",
-        });
-        conn.ws.close();
-        return;
+      if (conn.authTimer) {
+        clearTimeout(conn.authTimer);
+        conn.authTimer = null;
       }
       this.send(conn.ws, { type: "auth.ok", user: conn.user });
       this.send(conn.ws, { type: "feed.snapshot", events: this.feed });
@@ -152,6 +171,10 @@ export class CollabHub {
   }
 
   private onClose(conn: Connection): void {
+    if (conn.authTimer) {
+      clearTimeout(conn.authTimer);
+      conn.authTimer = null;
+    }
     this.connections.delete(conn.ws);
     if (conn.user) {
       this.presence.delete(conn.user.sub);

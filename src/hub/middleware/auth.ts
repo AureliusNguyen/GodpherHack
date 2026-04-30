@@ -1,10 +1,20 @@
 import type { Context, Next } from "hono";
 import type { AuthService, UserClaims } from "../services/auth.js";
 
-const PUBLIC_PREFIXES = ["/health", "/auth/", "/metrics", "/ws/"];
+// Exact-match allowlist. A prefix list silently exposes any future
+// /auth/<something> route, so list every public endpoint explicitly.
+const PUBLIC_PATHS = new Set([
+  "/health",
+  "/metrics",
+  "/auth/github",
+  "/auth/github/callback",
+]);
 
 function isPublic(path: string): boolean {
-  return PUBLIC_PREFIXES.some((p) => path === p.replace(/\/$/, "") || path.startsWith(p));
+  if (PUBLIC_PATHS.has(path)) return true;
+  // /ws/* is upgraded out of band before this middleware runs; no Hono
+  // route ever matches it. Listed for safety.
+  return path.startsWith("/ws/");
 }
 
 declare module "hono" {

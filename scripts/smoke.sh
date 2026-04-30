@@ -77,6 +77,7 @@ PINECONE_API_KEY="" \
 JWT_SECRET="" \
 GITHUB_CLIENT_ID="" \
 GITHUB_CLIENT_SECRET="" \
+ALLOW_ANONYMOUS_HUB="true" \
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d \
   --force-recreate >/tmp/godpherhack-up.log 2>&1 \
   || { tail -40 /tmp/godpherhack-up.log; die "docker compose up failed"; }
