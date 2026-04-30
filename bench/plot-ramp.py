@@ -50,8 +50,12 @@ def main() -> None:
     def col(row: dict[str, str], *names: str) -> float:
         for n in names:
             v = row.get(n)
-            if v not in (None, ""):
+            if v in (None, "", "N/A"):
+                continue
+            try:
                 return float(v)
+            except ValueError:
+                continue
         return 0.0
 
     p50 = [col(r, "50%") for r in aggregated]
