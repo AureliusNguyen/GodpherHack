@@ -14,10 +14,21 @@
 - Lazy MCP connection with auto-reconnect on timeout. Critical for a
   flaky bridge tool (Ghidra/IDA) not to take down the whole agent.
 
-## Security
+## Security + Live Collab
 
 - GitHub OAuth + JWT for Hub auth. No password DB, no per-user keys
   to manage. Every CTF team has GitHub accounts already.
+- OAuth design: Hub is the OAuth client, CLI owns only the loopback
+  redirect; CLI never sees the GitHub access_token. Loopback-only
+  redirect URI rejects attacker-controlled hosts; CSRF state token
+  blocks cross-site forgery on the OAuth dance.
+- Hub refuses to start without explicit `ALLOW_ANONYMOUS_HUB=true`
+  when auth env is missing. Fail-closed default removes the "forgot
+  to set JWT_SECRET" failure mode.
+- `live-collab.png`: two real GitHub-authenticated users on the lab
+  Hub, presence strip shows both handles + activity strings rendered
+  live from the WebSocket broadcast. Full flow + protocol in
+  `06-auth-and-collab.md`.
 
 ## Cloud Computing
 
@@ -43,17 +54,25 @@
 
 - Locust harness for the Hub API: read-heavy RAG queries, periodic
   health checks, occasional writes (5:2:1 weight).
-- Headline numbers (30 concurrent users, 49s run): 1062 requests,
-  zero failures, 21 RPS sustained. Aggregate latency: 4ms median,
-  9ms p95, 13ms p99.
-- The single 290ms outlier is the first cold-path `/challenges/
-  analyze` before any caching hits. Cache-warm hits are sub-10ms.
-- p95 holds 6-12ms in steady state -- normal variance under load,
-  not a regression. The chart bouncing in that band is honest noise.
-- /health p95 is 460 microseconds: the framework floor (Hono +
+- **Stepped ramp 5 -> 50 concurrent users on the lab machine**
+  (locust on the same host as the Hub, no network roundtrip per
+  request). 30s per plateau, 5 minutes total.
+- **Headline: 6,600 requests, 0 failures.** Aggregate p50=1ms,
+  p95=1ms, p99=4ms, max=16ms. ~33 RPS sustained at the 50-user
+  plateau.
+- `chart.png` (top panel): RPS scales **linearly** with user count
+  -- no bend, no saturation visible at 50 users.
+- `chart.png` (bottom panel): latency starts at p99=9ms (cold JIT
+  + caches), drops monotonically through the first 150s, settles at
+  p50=p95=1ms / p99=2ms. Standard Node.js startup behavior.
+- Honest framing: the system is **not being stressed** at 50 users.
+  The bottleneck is Locust's wait_time between requests per user,
+  not the server. Real saturation would surface around 500+ users
+  with no wait_time -- documented as a follow-up, not blocking.
+- `/health` p95 is 460 microseconds: the framework floor (Hono +
   middleware + JSON serialization + container network). The 13x
-  gap between health and analyze is the actual cost of the RAG
-  search, not measurement noise.
+  gap between `/health` and `/challenges/analyze` (6ms) is the
+  actual cost of the RAG search, not measurement noise.
 - Why we don't benchmark the agent itself: CTF solve times are too
   noisy run-to-run to compare meaningfully. The infra surface is
   what we can actually measure regression on.
@@ -64,6 +83,7 @@
   prom-client defaults bottom out at 5ms, which collapsed all our
   realistic latencies into one bucket. Custom buckets down to 500us
   surface real signal in the Grafana p95 panel.
+- Full result analysis + reproduction steps in `07-benchmarking.md`.
 
 ## Engineering Rigor
 
