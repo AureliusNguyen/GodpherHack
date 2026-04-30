@@ -14,7 +14,7 @@ interface OllamaChatResponse {
   done_reason?: string;
 }
 
-const DEFAULT_MODEL = "qwen2.5:14b";
+const DEFAULT_MODEL = "qwen3:14b";
 
 export class OllamaProvider implements Provider {
   readonly info: ProviderInfo = PROVIDERS.ollama;

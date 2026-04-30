@@ -12,7 +12,8 @@ export const PROVIDER_MODELS: Record<ProviderSlug, Array<{ id: string; label: st
     { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   ],
   ollama: [
-    { id: "qwen2.5:14b", label: "Qwen 2.5 14B (local)" },
+    { id: "qwen3:14b", label: "Qwen 3 14B (local)" },
+    { id: "qwen3:32b", label: "Qwen 3 32B (local)" },
     { id: "qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B (local)" },
     { id: "llama3.1:8b", label: "Llama 3.1 8B (local)" },
   ],
