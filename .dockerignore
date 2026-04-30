@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.github
+.vscode
+test
+writeups
+*.log
+.env
+.env.*
+!.env.example
+deploy
+bench
+docs
+runs
