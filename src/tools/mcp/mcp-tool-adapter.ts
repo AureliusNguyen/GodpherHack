@@ -52,13 +52,10 @@ export class McpToolAdapter implements ToolAdapter {
       await withTimeout(client.connect(transport), this.timeoutMs, `${this.name}.connect`);
       this.connected = true;
     } catch (err) {
-      // Timeout or transport error: connect() may still be running in
-      // the background with an open subprocess. Tear it down so we
-      // don't leak transports across retries.
-      this.client = null;
-      this.connected = false;
-      this.cachedTools = null;
-      try { await client.close(); } catch { /* already gone */ }
+      // If the timeout fired because the wire is wedged, awaiting
+      // close() here can hang the same way -- defeating the timeout.
+      // markDead() is fire-and-forget on close() for exactly this case.
+      this.markDead();
       throw err;
     }
   }

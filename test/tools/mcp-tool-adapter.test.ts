@@ -89,6 +89,21 @@ describe("McpToolAdapter", () => {
 
       expect(__mockClient.connect).toHaveBeenCalledTimes(1);
     });
+
+    it("connect timeout cleanup does not await a wedged close()", async () => {
+      // Both connect and close hang forever. Previously the connect
+      // catch block did `await client.close()` which would block
+      // indefinitely on a wedged transport, defeating the timeout.
+      __mockClient.connect.mockImplementationOnce(() => new Promise(() => {}));
+      __mockClient.close.mockImplementationOnce(() => new Promise(() => {}));
+
+      const adapter = new McpToolAdapter({ ...stdioConfig, timeoutMs: 20 });
+      const start = Date.now();
+      await expect(adapter.connect()).rejects.toThrow(/timed out/);
+      // Should reject in roughly the timeout window, not hang on close.
+      expect(Date.now() - start).toBeLessThan(200);
+      expect(adapter.isConnected()).toBe(false);
+    });
   });
 
   describe("listTools", () => {
