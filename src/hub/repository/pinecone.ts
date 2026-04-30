@@ -1,6 +1,7 @@
 import { Pinecone } from "@pinecone-database/pinecone";
 import type { WriteupEntry } from "../schemas/writeup.js";
 import type { SearchQuery, SearchResult, WriteupRepository } from "./types.js";
+import { pineconeQueriesTotal } from "../services/instrumentation.js";
 
 export interface PineconeRepoConfig {
   apiKey: string;
@@ -46,6 +47,7 @@ export class PineconeWriteupRepository implements WriteupRepository {
     }
     const hasFilter = Object.keys(filter).length > 0;
 
+    pineconeQueriesTotal.inc({ kind: "search" });
     const results = await ns.searchRecords({
       query: {
         topK: query.topK,
@@ -66,6 +68,7 @@ export class PineconeWriteupRepository implements WriteupRepository {
     const index = this.client.index(this.indexName);
     const ns = index.namespace(this.namespace);
 
+    pineconeQueriesTotal.inc({ kind: "upsert" });
     await ns.upsertRecords({
       records: [{
         _id: entry.id,
@@ -105,6 +108,7 @@ export class PineconeWriteupRepository implements WriteupRepository {
     const ns = index.namespace(this.namespace);
 
     try {
+      pineconeQueriesTotal.inc({ kind: "delete" });
       await ns.deleteOne({ id });
       this.indexGeneration++;
       return true;

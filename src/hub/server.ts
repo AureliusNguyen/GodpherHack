@@ -5,8 +5,10 @@ import type { AuthService } from "./services/auth.js";
 import { SearchService } from "./services/search.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { requireJwt } from "./middleware/auth.js";
+import { metricsMiddleware } from "./middleware/metrics.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
+import { metricsRoutes } from "./routes/metrics.js";
 import { challengeRoutes } from "./routes/challenges.js";
 import { solveRoutes } from "./routes/solves.js";
 
@@ -21,6 +23,7 @@ export function createHub(deps: HubDeps): Hono {
   const searchService = new SearchService(deps.repository);
 
   app.use("*", errorHandler);
+  app.use("*", metricsMiddleware);
 
   if (deps.auth) {
     app.use("*", requireJwt(deps.auth));
@@ -28,6 +31,7 @@ export function createHub(deps: HubDeps): Hono {
   }
 
   app.route("/", healthRoutes(deps.repository));
+  app.route("/", metricsRoutes());
   app.route("/", challengeRoutes(deps.analyzer, searchService, deps.repository));
   app.route("/", solveRoutes(deps.repository));
 
