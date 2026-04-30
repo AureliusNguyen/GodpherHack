@@ -129,19 +129,19 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "LLM tokens / sec by provider+kind",
+      "title": "Request count by status code",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (provider, kind) (rate(godpherhack_llm_tokens_total[1m]))",
-          "legendFormat": "{{provider}} {{kind}}"
+          "expr": "sum by (status) (rate(godpherhack_http_requests_total[1m]))",
+          "legendFormat": "{{status}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "reqps",
           "custom": { "drawStyle": "line", "fillOpacity": 10 }
         }
       }

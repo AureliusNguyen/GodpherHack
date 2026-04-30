@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # Stage 1: build the bundled CLI/Hub from source
 FROM node:22-bookworm AS builder
 

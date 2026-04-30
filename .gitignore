@@ -10,3 +10,7 @@ master.txt
 challenges/
 writeups/**/*.txt
 writeups/.upserted.json
+bench/.venv/
+bench/results/
+bench/__pycache__/
+__pycache__/
