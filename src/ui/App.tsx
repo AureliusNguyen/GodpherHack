@@ -540,7 +540,7 @@ function App({ challengeDir }: AppProps) {
         history: agentHistory.current,
         userMessage: userText,
         model: selectedModel ?? undefined,
-        onEvent: (event) => collabRef.current?.emitAgentEvent(runId, event as unknown as Record<string, unknown>),
+        onEvent: (event) => collabRef.current?.emitAgentEvent(runId, event),
       });
 
       for await (const event of events) {

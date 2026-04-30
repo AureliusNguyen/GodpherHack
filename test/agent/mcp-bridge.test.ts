@@ -133,6 +133,43 @@ describe("McpToolBridge", () => {
     expect(result).toBe("Error: connection refused");
   });
 
+  it("a failed connect does not poison subsequent attempts", async () => {
+    // Regression: getAdapter() used to leave the rejected promise in
+    // the `connecting` map forever, so every later tool call returned
+    // the same "Error: connect 1" without ever retrying.
+    let attempt = 0;
+    const pack: McpToolPack = {
+      name: "FlakyPack",
+      tools: SAMPLE_TOOLS,
+      createAdapter: () => {
+        attempt += 1;
+        const thisAttempt = attempt;
+        return createMockAdapter({
+          connect: vi.fn(async () => {
+            if (thisAttempt === 1) throw new Error(`connect ${thisAttempt}`);
+          }),
+          invoke: vi.fn(async (name: string): Promise<ToolResult> => ({
+            toolName: name,
+            success: true,
+            output: { type: "text", content: `attempt-${thisAttempt}` },
+            durationMs: 1,
+          })),
+        });
+      },
+    };
+
+    const bridge = new McpToolBridge([pack]);
+    const tools = bridge.getTools();
+
+    const first = await tools[0].execute({ function_name: "main" });
+    expect(first).toMatch(/^Error: connect 1$/);
+
+    // Second call must build a fresh adapter and succeed.
+    const second = await tools[0].execute({ function_name: "main" });
+    expect(second).toBe("attempt-2");
+    expect(attempt).toBe(2);
+  });
+
   it("no adapters connected after getTools() alone", async () => {
     const adapter = createMockAdapter();
     const bridge = new McpToolBridge([createPack(adapter)]);

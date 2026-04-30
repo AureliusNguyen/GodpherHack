@@ -38,9 +38,21 @@ export class McpToolAdapter implements ToolAdapter {
     if (this.connected) return;
 
     const transport = this.createTransport();
-    this.client = new Client({ name: "godpherhack", version: "0.1.0" });
-    await withTimeout(this.client.connect(transport), this.timeoutMs, `${this.name}.connect`);
-    this.connected = true;
+    const client = new Client({ name: "godpherhack", version: "0.1.0" });
+    this.client = client;
+    try {
+      await withTimeout(client.connect(transport), this.timeoutMs, `${this.name}.connect`);
+      this.connected = true;
+    } catch (err) {
+      // Timeout or transport error: connect() may still be running in
+      // the background with an open subprocess. Tear it down so we
+      // don't leak transports across retries.
+      this.client = null;
+      this.connected = false;
+      this.cachedTools = null;
+      try { await client.close(); } catch { /* already gone */ }
+      throw err;
+    }
   }
 
   async disconnect(): Promise<void> {

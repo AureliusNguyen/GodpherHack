@@ -109,6 +109,13 @@ export class CollabHub {
     const type = msg.type as string;
 
     if (type === "auth") {
+      // Reject re-auth on an already-authed connection. If we accepted
+      // it, overwriting conn.user would orphan the old presence entry
+      // (keyed on the previous sub) until the TTL gc reaped it.
+      if (conn.user) {
+        this.send(conn.ws, { type: "auth.error", error: "Already authenticated" });
+        return;
+      }
       const token = msg.token as string;
       if (!this.auth) {
         // Anonymous mode -- per-connection synthetic id so multiple anon

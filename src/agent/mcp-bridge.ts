@@ -77,13 +77,19 @@ export class McpToolBridge {
     const inflight = this.connecting.get(pack.name);
     if (inflight) return inflight;
 
-    // Start new connection
+    // Start new connection. The try/finally is critical: if connect()
+    // rejects, the cleanup must still drop the rejected promise from
+    // `connecting` -- otherwise every future getAdapter() returns the
+    // same poisoned promise and never retries.
     const promise = (async () => {
       const adapter = pack.createAdapter();
-      await adapter.connect();
-      this.adapters.set(pack.name, adapter);
-      this.connecting.delete(pack.name);
-      return adapter;
+      try {
+        await adapter.connect();
+        this.adapters.set(pack.name, adapter);
+        return adapter;
+      } finally {
+        this.connecting.delete(pack.name);
+      }
     })();
 
     this.connecting.set(pack.name, promise);

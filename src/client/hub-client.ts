@@ -32,12 +32,14 @@ export class HubClient {
   }
 
   async analyze(req: AnalyzeRequest): Promise<AnalyzeResponse> {
-    const { indexGeneration } = await this.health();
+    const { indexGeneration, analyzerVersion } = await this.health();
 
-    // One cache, keyed on indexGeneration. The earlier two-layer cache
-    // could return stale topWriteups after a new solve was indexed
-    // because the analysis-only entry persisted across generation bumps.
-    const retrievalKey = cacheKey("retrieval", req, indexGeneration);
+    // One cache, keyed on both fences. indexGeneration invalidates when
+    // new writeups are indexed; analyzerVersion invalidates when the
+    // categorization/keyword logic changes server-side. Without the
+    // latter, a 24h-cached response keeps stale category labels across
+    // an analyzer upgrade.
+    const retrievalKey = cacheKey("retrieval", req, analyzerVersion, indexGeneration);
     const cached = await this.cache.get<AnalyzeResponse>(retrievalKey);
     if (cached) return cached;
 

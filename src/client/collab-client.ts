@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { readStoredToken } from "./auth-client.js";
 import type { PresenceEntry, FeedEvent } from "../hub/services/collab-hub.js";
+import type { AgentEvent } from "../agent/types.js";
 
 export type CollabMessage =
   | { type: "auth.ok"; user: { sub: string; login: string } }
@@ -105,7 +106,7 @@ export class CollabClient {
     this.sendPresence();
   }
 
-  emitAgentEvent(runId: string, event: Record<string, unknown>): void {
+  emitAgentEvent(runId: string, event: AgentEvent): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ type: "agent.event", runId, event }));
   }
