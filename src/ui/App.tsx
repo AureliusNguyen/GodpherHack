@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { basename } from "node:path";
 import { render, Text, Box, useInput, useApp } from "ink";
 import Spinner from "ink-spinner";
 import Gradient from "ink-gradient";
@@ -326,7 +327,7 @@ function InputBox({
         </Text>
       ) : (
         <Text>
-          <Text color="gray">{placeholder || "Type a message lil bro..."}</Text>
+          <Text color="gray">{placeholder || "Type a message..."}</Text>
           <Text color="red" bold>
             _
           </Text>
@@ -362,7 +363,7 @@ function App({ challengeDir }: AppProps) {
     {
       id: nextId(),
       type: "system",
-      text: "Wadup lil bro! Select a provider to get started.",
+      text: "Welcome. Select a provider to get started.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -441,7 +442,7 @@ function App({ challengeDir }: AppProps) {
           pushMessages({
             id: nextId(),
             type: "system",
-            text: `${PROVIDERS[slug].displayName} is ready. Start chatting lil bro!`,
+            text: `${PROVIDERS[slug].displayName} is ready.`,
           });
         })
         .catch((err) => {
@@ -466,7 +467,7 @@ function App({ challengeDir }: AppProps) {
     pushMessages({
       id: nextId(),
       type: "system",
-      text: `${PROVIDERS[slug].displayName} selected. Enter your API key lil bro:`,
+      text: `${PROVIDERS[slug].displayName} selected. Enter your API key:`,
     });
     setInput("");
     setMode("api-key");
@@ -476,7 +477,7 @@ function App({ challengeDir }: AppProps) {
     if (!provider) {
       pushMessages(
         { id: nextId(), type: "user", text: "/model" },
-        { id: nextId(), type: "system", text: "No provider selected yet lil bro." },
+        { id: nextId(), type: "system", text: "No provider selected yet." },
       );
       return;
     }
@@ -485,14 +486,14 @@ function App({ challengeDir }: AppProps) {
     if (models.length === 0) {
       pushMessages(
         { id: nextId(), type: "user", text: "/model" },
-        { id: nextId(), type: "system", text: `No models available for ${PROVIDERS[provider].displayName} yet lil bro.` },
+        { id: nextId(), type: "system", text: `No models available for ${PROVIDERS[provider].displayName} yet.` },
       );
       return;
     }
 
     pushMessages(
       { id: nextId(), type: "user", text: "/model" },
-      { id: nextId(), type: "system", text: "Select a model lil bro:" },
+      { id: nextId(), type: "system", text: "Select a model:" },
     );
 
     setActiveChoice({
@@ -525,10 +526,11 @@ function App({ challengeDir }: AppProps) {
     ];
     const systemPrompt = buildSystemPrompt(cwd, [...mcpBridge.current.getPromptKeys(), "qemu"]);
     const runId = `run_${Date.now().toString(36)}`;
+    const challengeName = basename(cwd);
 
     setProcessingText("Thinking...");
     setMode("processing");
-    collabRef.current?.setActivity(`solving in ${cwd.split("/").slice(-1)[0]}`, cwd.split("/").slice(-1)[0]);
+    collabRef.current?.setActivity(`solving in ${challengeName}`, challengeName);
 
     try {
       const events = agentLoop({
@@ -538,8 +540,7 @@ function App({ challengeDir }: AppProps) {
         history: agentHistory.current,
         userMessage: userText,
         model: selectedModel ?? undefined,
-        runId,
-        collab: collabRef.current ?? undefined,
+        onEvent: (event) => collabRef.current?.emitAgentEvent(runId, event as unknown as Record<string, unknown>),
       });
 
       for await (const event of events) {
@@ -637,7 +638,7 @@ function App({ challengeDir }: AppProps) {
         pushMessages({
           id: nextId(),
           type: "system",
-          text: `${info.displayName} is ready. Start chatting lil bro!`,
+          text: `${info.displayName} is ready.`,
         });
       })
       .catch((err) => {
@@ -758,7 +759,7 @@ function App({ challengeDir }: AppProps) {
       {mode === "choice" && activeChoice ? (
         <ChoiceSelector options={activeChoice.options} cursor={cursor} />
       ) : mode === "api-key" ? (
-        <InputBox value={input} placeholder="Paste your API key lil bro..." masked />
+        <InputBox value={input} placeholder="Paste your API key..." masked />
       ) : mode === "processing" ? (
         <ProcessingIndicator text={processingText} />
       ) : (

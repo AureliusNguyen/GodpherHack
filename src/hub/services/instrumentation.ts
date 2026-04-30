@@ -30,10 +30,3 @@ export const pineconeQueriesTotal = new Counter({
   labelNames: ["kind"] as const,
   registers: [registry],
 });
-
-export const llmTokensTotal = new Counter({
-  name: "godpherhack_llm_tokens_total",
-  help: "LLM tokens by provider/model/direction.",
-  labelNames: ["provider", "model", "kind"] as const,
-  registers: [registry],
-});

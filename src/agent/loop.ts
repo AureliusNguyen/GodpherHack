@@ -11,10 +11,6 @@ import type { Provider } from "../providers/types.js";
 const MAX_ITERATIONS = 20;
 const MAX_TOOL_OUTPUT_LINES = 200;
 
-export interface CollabEmitter {
-  emitAgentEvent(runId: string, event: Record<string, unknown>): void;
-}
-
 export interface AgentLoopParams {
   provider: Provider;
   tools: RegisteredTool[];
@@ -22,16 +18,14 @@ export interface AgentLoopParams {
   history: ProviderMessage[];
   userMessage: string;
   model?: string;
-  /** Optional run id used to thread events through CollabEmitter. */
-  runId?: string;
-  /** Optional collab client; when present, every yielded event is broadcast. */
-  collab?: CollabEmitter;
+  /** Optional side channel: every yielded event is also forwarded here. */
+  onEvent?: (event: AgentEvent) => void;
 }
 
 function truncateToolOutput(output: string): string {
   const lines = output.split("\n");
   if (lines.length <= MAX_TOOL_OUTPUT_LINES) return output;
-  return lines.slice(0, MAX_TOOL_OUTPUT_LINES).join("\n") + `\n[truncated — ${lines.length - MAX_TOOL_OUTPUT_LINES} more lines]`;
+  return lines.slice(0, MAX_TOOL_OUTPUT_LINES).join("\n") + `\n[truncated -- ${lines.length - MAX_TOOL_OUTPUT_LINES} more lines]`;
 }
 
 /**
@@ -39,11 +33,13 @@ function truncateToolOutput(output: string): string {
  * Mutates the provided history array in place (caller keeps a reference).
  */
 export async function* agentLoop(params: AgentLoopParams): AsyncGenerator<AgentEvent> {
-  const { provider, tools, systemPrompt, history, userMessage, model, runId, collab } = params;
+  const { provider, tools, systemPrompt, history, userMessage, model, onEvent } = params;
 
   function emit(event: AgentEvent): AgentEvent {
-    if (collab && runId) {
-      collab.emitAgentEvent(runId, event as unknown as Record<string, unknown>);
+    try {
+      onEvent?.(event);
+    } catch {
+      // Side-channel must never crash the agent loop.
     }
     return event;
   }

@@ -60,9 +60,6 @@ export class OllamaProvider implements Provider {
       ollamaMessages.push({ role: "system", content: options.system });
     }
 
-    // Track synthetic tool_use ids -> tool name for pairing tool results back
-    const idToName = new Map<string, string>();
-
     for (const msg of messages) {
       if (msg.role === "assistant") {
         const textParts: string[] = [];
@@ -70,7 +67,7 @@ export class OllamaProvider implements Provider {
         for (const block of msg.content) {
           if (block.type === "text") textParts.push(block.text);
           else if (block.type === "tool_use") {
-            idToName.set(block.id, block.name);
+            // Ollama matches tool results to calls positionally, not by id.
             toolCalls.push({ function: { name: block.name, arguments: block.input } });
           }
         }

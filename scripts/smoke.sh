@@ -118,7 +118,7 @@ SOLVE_ID=$(echo "$SOLVE" | jq -r .id)
 [[ "$SOLVE_ID" =~ ^[0-9a-f]{16}$ ]] || die "unexpected solve id: $SOLVE_ID"
 ok "solve stored (id=$SOLVE_ID)"
 
-# 5. POST a search that should match
+# 5. POST a search that should match the writeup we just submitted
 step "Querying /challenges/analyze..."
 ANALYZE=$(curl -fsS -X POST "$HUB_URL/challenges/analyze" \
   -H "Content-Type: application/json" \
@@ -132,7 +132,13 @@ ANALYZE=$(curl -fsS -X POST "$HUB_URL/challenges/analyze" \
     "topK": 3
   }') || die "/challenges/analyze failed"
 echo "$ANALYZE" | jq . >/dev/null || die "analyze returned non-JSON"
-ok "/challenges/analyze returned JSON"
+
+# Assert the search actually returned the solve we just submitted.
+# (In-memory repo + matching keywords -> the solve must be in topWriteups.)
+HITS=$(echo "$ANALYZE" | jq -r '.topWriteups[].id // empty')
+echo "$HITS" | grep -qx "$SOLVE_ID" \
+  || die "topWriteups did not contain the submitted solve ($SOLVE_ID); got: $HITS"
+ok "/challenges/analyze returned topWriteups containing $SOLVE_ID"
 
 # 6. /health indexGeneration bumped
 NEW_GEN=$(curl -fsS "$HUB_URL/health" | jq -r .indexGeneration)
