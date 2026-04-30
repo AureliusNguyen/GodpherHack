@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: godpherhack-hub
+  namespace: godpherhack
+  labels:
+    app.kubernetes.io/name: godpherhack-hub
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: godpherhack-hub
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
