@@ -14,3 +14,6 @@ bench/.venv/
 bench/results/
 bench/__pycache__/
 __pycache__/
+.env
+.env.*
+!.env.example

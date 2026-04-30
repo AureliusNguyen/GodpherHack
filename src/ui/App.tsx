@@ -25,7 +25,29 @@ import {
 } from "../agent/index.js";
 import { GHIDRA_TOOL_DEFINITIONS, createGhidraAdapter, IDA_TOOL_DEFINITIONS, createIdaAdapter } from "../tools/index.js";
 import { CollabClient } from "../client/collab-client.js";
+import { loginWithGithub, readStoredToken } from "../client/auth-client.js";
 import type { PresenceEntry } from "../hub/services/collab-hub.js";
+
+interface AuthedUser {
+  sub: string;
+  login: string;
+  name?: string;
+}
+
+/** Decode a JWT payload without verifying. UI display only -- the Hub re-verifies on every request. */
+function decodeJwtPayload(token: string): AuthedUser | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const json = Buffer.from(parts[1], "base64url").toString("utf-8");
+    const claims = JSON.parse(json) as { sub?: string; login?: string; name?: string; exp?: number };
+    if (!claims.sub || !claims.login) return null;
+    if (claims.exp && claims.exp * 1000 < Date.now()) return null;
+    return { sub: claims.sub, login: claims.login, name: claims.name };
+  } catch {
+    return null;
+  }
+}
 
 // --- Display message types (stable IDs for React keys) ---
 
@@ -359,19 +381,36 @@ function App({ challengeDir }: AppProps) {
   const idCounter = useRef(0);
   const nextId = () => String(++idCounter.current);
 
-  const [messages, setMessages] = useState<DisplayMessage[]>([
-    {
-      id: nextId(),
-      type: "system",
-      text: "Welcome. Select a provider to get started.",
-    },
-  ]);
+  // Auth: when HUB_BASE_URL is set, the user must either sign in via
+  // GitHub OAuth or explicitly continue as guest before picking a
+  // provider. When no Hub is configured, skip auth entirely.
+  const initialAuth = (() => {
+    const hubUrl = process.env.HUB_BASE_URL;
+    if (!hubUrl) return { needsPrompt: false, user: null as AuthedUser | null };
+    const token = readStoredToken(hubUrl);
+    const claims = token ? decodeJwtPayload(token) : null;
+    return { needsPrompt: !claims, user: claims };
+  })();
+
+  const [authedUser, setAuthedUser] = useState<AuthedUser | null>(initialAuth.user);
+
+  const initialMessages: DisplayMessage[] = initialAuth.user
+    ? [
+        { id: nextId(), type: "system", text: `Signed in as @${initialAuth.user.login}.` },
+        { id: nextId(), type: "system", text: "Select a provider to get started." },
+      ]
+    : initialAuth.needsPrompt
+      ? [{ id: nextId(), type: "system", text: "Welcome. Sign in to continue." }]
+      : [{ id: nextId(), type: "system", text: "Welcome. Select a provider to get started." }];
+
+  const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<InputMode>("choice");
-  const [activeChoice, setActiveChoice] = useState<ActiveChoice | null>({
-    options: PROVIDER_CHOICES,
-    onSelect: handleProviderChoice,
-  });
+  const [activeChoice, setActiveChoice] = useState<ActiveChoice | null>(
+    initialAuth.needsPrompt
+      ? { options: ["Sign in with GitHub", "Continue as guest"], onSelect: handleAuthChoice }
+      : { options: PROVIDER_CHOICES, onSelect: handleProviderChoice },
+  );
   const [cursor, setCursor] = useState(0);
   const [ctrlCPressed, setCtrlCPressed] = useState(false);
   const [provider, setProvider] = useState<ProviderSlug | null>(null);
@@ -416,6 +455,76 @@ function App({ challengeDir }: AppProps) {
   const pushMessages = (...msgs: DisplayMessage[]) => {
     setMessages((prev) => [...prev, ...msgs]);
   };
+
+  function showProviderPicker() {
+    setActiveChoice({ options: PROVIDER_CHOICES, onSelect: handleProviderChoice });
+    setCursor(0);
+    setMode("choice");
+  }
+
+  function handleAuthChoice(chosen: string) {
+    if (chosen === "Continue as guest") {
+      pushMessages({
+        id: nextId(),
+        type: "system",
+        text: "Continuing as guest. Hub features (collab, search) will be unavailable until you sign in.",
+      });
+      showProviderPicker();
+      return;
+    }
+
+    const hubUrl = process.env.HUB_BASE_URL;
+    if (!hubUrl) {
+      pushMessages({
+        id: nextId(),
+        type: "system",
+        text: "HUB_BASE_URL not set; cannot sign in. Continuing as guest.",
+      });
+      showProviderPicker();
+      return;
+    }
+
+    setProcessingText("Waiting for GitHub authorization...");
+    setMode("processing");
+
+    loginWithGithub(hubUrl, {
+      onAuthUrl: (url) => {
+        pushMessages({
+          id: nextId(),
+          type: "system",
+          text: `Sign-in URL: ${url}\n\nOpen it in your browser if it didn't open automatically. Approve the app, then return here.`,
+        });
+      },
+    })
+      .then((token) => {
+        const claims = decodeJwtPayload(token);
+        if (!claims) {
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: "Token received but could not decode user info. Continuing anyway.",
+          });
+        } else {
+          setAuthedUser(claims);
+          pushMessages({
+            id: nextId(),
+            type: "system",
+            text: `Signed in as @${claims.login}${claims.name ? ` (${claims.name})` : ""}.`,
+          });
+        }
+      })
+      .catch((err) => {
+        pushMessages({
+          id: nextId(),
+          type: "system",
+          text: `Sign-in failed: ${err instanceof Error ? err.message : String(err)}. Continuing as guest.`,
+        });
+      })
+      .finally(() => {
+        setProcessingText("");
+        showProviderPicker();
+      });
+  }
 
   function handleProviderChoice(chosen: string) {
     const slug = resolveProvider(chosen);
@@ -774,13 +883,16 @@ function App({ challengeDir }: AppProps) {
             <Text dimColor>ctrl+c to exit . /model to switch . ctrl+o to expand</Text>
           )}
         </Box>
-        {selectedModel && (
-          <Box>
+        <Box>
+          {authedUser && (
+            <Text color="green">@{authedUser.login} </Text>
+          )}
+          {selectedModel && (
             <Text dimColor>
               {PROVIDER_MODELS[provider!]?.find((m) => m.id === selectedModel)?.label ?? selectedModel}
             </Text>
-          </Box>
-        )}
+          )}
+        </Box>
       </Box>
 
       {process.env.HUB_BASE_URL && (

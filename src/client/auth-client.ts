@@ -40,11 +40,21 @@ function openBrowser(url: string): void {
   spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
 }
 
+export interface LoginOptions {
+  /** Optional callback fired with the auth URL once the listener is bound.
+   *  When the caller is the Ink UI, console.log gets eaten -- use this to
+   *  surface the URL as a system message instead. */
+  onAuthUrl?: (url: string) => void;
+  /** Skip auto-opening the browser. Useful when the host has no browser
+   *  reachable (e.g. raw WSL without wslview installed). */
+  skipBrowserOpen?: boolean;
+}
+
 /**
  * OAuth login: starts local listener, opens browser to Hub OAuth flow,
  * waits for token redirect, persists to ~/.godpherhack/auth.json.
  */
-export async function loginWithGithub(hubBaseUrl: string): Promise<string> {
+export async function loginWithGithub(hubBaseUrl: string, opts: LoginOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? "/", `http://localhost`);
@@ -76,9 +86,13 @@ export async function loginWithGithub(hubBaseUrl: string): Promise<string> {
       const callback = `http://127.0.0.1:${addr.port}/cb`;
       const authUrl = `${hubBaseUrl.replace(/\/$/, "")}/auth/github?redirect=${encodeURIComponent(callback)}`;
 
-      console.log(`Opening browser to: ${authUrl}`);
-      console.log(`If the browser does not open, paste that URL manually.`);
-      openBrowser(authUrl);
+      if (opts.onAuthUrl) {
+        opts.onAuthUrl(authUrl);
+      } else {
+        console.log(`Opening browser to: ${authUrl}`);
+        console.log(`If the browser does not open, paste that URL manually.`);
+      }
+      if (!opts.skipBrowserOpen) openBrowser(authUrl);
 
       setTimeout(() => {
         server.close();
