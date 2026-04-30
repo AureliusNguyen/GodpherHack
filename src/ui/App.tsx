@@ -191,32 +191,17 @@ function Header() {
 
 const MemoHeader = React.memo(Header);
 
-const GRADIENT_CYCLE = [
-  "#FF0000", "#DD0000", "#AA0000", "#770000", "#440000",
-  "#770000", "#AA0000", "#DD0000",
-];
+const GRADIENT_COLORS = ["#FF0000", "#DD0000", "#AA0000", "#770000"];
 
 function GradientLabel({ children }: { children: string }) {
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => setFrame((f) => (f + 1) % GRADIENT_CYCLE.length), 150);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Slide a window through the cycle to create moving effect
-  const colors = Array.from({ length: 4 }, (_, i) =>
-    GRADIENT_CYCLE[(frame + i) % GRADIENT_CYCLE.length],
-  );
-
   return (
-    <Gradient colors={colors}>
+    <Gradient colors={GRADIENT_COLORS}>
       <Text bold>{children}</Text>
     </Gradient>
   );
 }
 
-function MessageView({ msg, expanded }: { msg: DisplayMessage; expanded: boolean }) {
+function MessageViewImpl({ msg, expanded }: { msg: DisplayMessage; expanded: boolean }) {
   switch (msg.type) {
     case "user":
       return (
@@ -278,6 +263,12 @@ function MessageView({ msg, expanded }: { msg: DisplayMessage; expanded: boolean
       );
   }
 }
+
+// Memoized: append-only history with stable IDs, so re-render only when expansion toggles.
+const MessageView = React.memo(
+  MessageViewImpl,
+  (prev, next) => prev.msg === next.msg && prev.expanded === next.expanded,
+);
 
 function ChoiceSelector({
   options,
