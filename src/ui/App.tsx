@@ -7,6 +7,7 @@ import {
   PROVIDERS,
   PROVIDER_MODELS,
   resolveProvider,
+  resolveApiKey,
   createProvider,
   type Provider,
   type ProviderSlug,
@@ -395,14 +396,14 @@ function App({ challengeDir }: AppProps) {
     const slug = resolveProvider(chosen);
     if (!slug) return;
 
-    // Check if API key is already in env
-    const envKey = process.env[PROVIDERS[slug].envKey];
+    // resolveApiKey returns env value, or for Ollama falls back to localhost.
+    const envKey = resolveApiKey(slug);
     if (envKey) {
-      // Skip API key prompt — initialize directly
+      const sourceNote = slug === "ollama" ? "base URL configured" : "API key found in env";
       pushMessages({
         id: nextId(),
         type: "system",
-        text: `${PROVIDERS[slug].displayName} selected (API key found in env).`,
+        text: `${PROVIDERS[slug].displayName} selected (${sourceNote}).`,
       });
       setProcessingText(`Initializing ${PROVIDERS[slug].name}...`);
       setMode("processing");
