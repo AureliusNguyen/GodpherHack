@@ -4,6 +4,7 @@ dist/
 *.tsbuildinfo
 CLAUDE.md
 .claude/
+.codex
 proposal.tex
 master.txt
 challenges/
