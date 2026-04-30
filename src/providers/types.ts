@@ -1,4 +1,4 @@
-export type ProviderSlug = "anthropic" | "openai" | "google" | "ollama";
+export type ProviderSlug = "anthropic" | "openai" | "google" | "ollama" | "litellm";
 
 export interface ProviderInfo {
   slug: ProviderSlug;

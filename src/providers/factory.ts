@@ -16,6 +16,11 @@ export const PROVIDER_MODELS: Record<ProviderSlug, Array<{ id: string; label: st
     { id: "qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B (local)" },
     { id: "llama3.1:8b", label: "Llama 3.1 8B (local)" },
   ],
+  litellm: [
+    { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5 via LiteLLM" },
+    { id: "gpt-4o", label: "GPT-4o via LiteLLM" },
+    { id: "gpt-4o-mini", label: "GPT-4o mini via LiteLLM" },
+  ],
 };
 
 export function resolveApiKey(slug: ProviderSlug): string | null {
@@ -39,6 +44,10 @@ export async function createProvider(slug: ProviderSlug, apiKey: string): Promis
     case "ollama": {
       const { createOllamaProvider } = await import("./ollama.js");
       return createOllamaProvider(apiKey);
+    }
+    case "litellm": {
+      const { createLiteLLMProvider } = await import("./litellm.js");
+      return createLiteLLMProvider(apiKey);
     }
   }
 }
