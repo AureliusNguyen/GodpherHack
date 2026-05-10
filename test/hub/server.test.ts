@@ -228,6 +228,169 @@ describe("Hub API server", () => {
     });
   });
 
+  describe("POST /challenges/analyze — schema rejection", () => {
+    it("rejects missing challenge object", async () => {
+      const { app } = setup();
+      const res = await app.request("/challenges/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects empty challenge name", async () => {
+      const { app } = setup();
+      const res = await app.request("/challenges/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge: { name: "", description: "test" } }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects missing challenge description", async () => {
+      const { app } = setup();
+      const res = await app.request("/challenges/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge: { name: "test" } }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects empty challenge description", async () => {
+      const { app } = setup();
+      const res = await app.request("/challenges/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge: { name: "test", description: "" } }),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("POST /solves — schema rejection", () => {
+    it("rejects invalid category enum", async () => {
+      const { app } = setup();
+      const res = await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeName: "test",
+          category: "not-a-category",
+          writeup: "content",
+          executionSteps: ["step1"],
+          tools: ["gdb"],
+          keyInsights: ["insight"],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects missing challengeName", async () => {
+      const { app } = setup();
+      const res = await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: "pwn",
+          writeup: "content",
+          executionSteps: ["step1"],
+          tools: ["gdb"],
+          keyInsights: ["insight"],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects empty executionSteps array", async () => {
+      const { app } = setup();
+      const res = await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeName: "test",
+          category: "pwn",
+          writeup: "content",
+          executionSteps: [],
+          tools: ["gdb"],
+          keyInsights: ["insight"],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects wrong type for tools (string instead of array)", async () => {
+      const { app } = setup();
+      const res = await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeName: "test",
+          category: "pwn",
+          writeup: "content",
+          executionSteps: ["step1"],
+          tools: "gdb",
+          keyInsights: ["insight"],
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("journey: store writeups then analyze", () => {
+    it("analyze returns stored writeups ranked by similarity", async () => {
+      const { app } = setup();
+
+      // Store a pwn writeup
+      await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeName: "heap-overflow-1",
+          category: "pwn",
+          writeup: "Exploited a heap buffer overflow using use-after-free to gain code execution",
+          executionSteps: ["found overflow", "crafted exploit", "got shell"],
+          tools: ["gdb", "pwntools"],
+          keyInsights: ["heap overflow", "use-after-free"],
+        }),
+      });
+
+      // Store a crypto writeup (less relevant)
+      await app.request("/solves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeName: "rsa-easy",
+          category: "crypto",
+          writeup: "Factored the RSA modulus using small prime factor",
+          executionSteps: ["extracted modulus", "factored n", "decrypted flag"],
+          tools: ["python3", "sage"],
+          keyInsights: ["small factor", "RSA"],
+        }),
+      });
+
+      // Analyze a pwn challenge — should rank the pwn writeup higher
+      const res = await app.request("/challenges/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challenge: {
+            name: "heap-overflow-2",
+            description: "Binary with a heap overflow vulnerability, find the flag",
+          },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = await json(res);
+      expect(body.topWriteups.length).toBeGreaterThanOrEqual(1);
+      // The pwn writeup should be first (higher keyword overlap with "heap overflow")
+      expect(body.topWriteups[0].category).toBe("pwn");
+    });
+  });
+
   describe("POST /challenges/retry", () => {
     it("returns refined analysis with feedback", async () => {
       const { app } = setup();

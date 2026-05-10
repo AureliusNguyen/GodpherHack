@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: godpherhack-hub-config
+  namespace: godpherhack
+data:
+  # Public, non-secret config. Replace with your own values per environment.
+  HUB_BASE_URL: "https://hub.example.com"
+  PINECONE_INDEX_NAME: "ctf-writeups"

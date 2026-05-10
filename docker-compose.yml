@@ -1,0 +1,35 @@
+# Single-host stack for the Hub. Observability containers (prometheus,
+# grafana) are layered on top in docker-compose.observability.yml so
+# the base stack stays minimal.
+#
+#   docker compose up                                           # hub only
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
+#
+# Multi-instance scaling lives in deploy/k8s/.
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: godpherhack/hub:dev
+    container_name: godpherhack-hub
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Pinecone (optional). Without these, Hub falls back to in-memory.
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-ctf-writeups}
+      # Auth (optional). All three must be set to enable.
+      JWT_SECRET: ${JWT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      HUB_BASE_URL: ${HUB_BASE_URL:-http://localhost:3000}
+      # Set to "true" to run an open Hub (no auth). Refused otherwise.
+      ALLOW_ANONYMOUS_HUB: ${ALLOW_ANONYMOUS_HUB:-}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -7,8 +7,8 @@ import type {
   SolveSubmitResponse,
 } from "../shared/api-types.js";
 import { FileCache, cacheKey } from "./cache.js";
+import { readStoredToken } from "./auth-client.js";
 
-const ANALYSIS_TTL = 1000 * 60 * 60;       // 1 hour for LLM categorization
 const RETRIEVAL_TTL = 1000 * 60 * 60 * 24; // 24 hours for RAG results
 
 export class HubClient {
@@ -20,6 +20,11 @@ export class HubClient {
     this.cache = new FileCache();
   }
 
+  private authHeaders(): Record<string, string> {
+    const token = readStoredToken(this.baseUrl);
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
   async health(): Promise<{ status: string; analyzerVersion: string; indexGeneration: number }> {
     const res = await fetch(`${this.baseUrl}/health`);
     if (!res.ok) throw new Error(`Hub health check failed: ${res.status}`);
@@ -29,22 +34,16 @@ export class HubClient {
   async analyze(req: AnalyzeRequest): Promise<AnalyzeResponse> {
     const { indexGeneration, analyzerVersion } = await this.health();
 
-    // Analysis cache: keyed by challenge + analyzerVersion (invalidates on analyzer upgrade)
-    const analysisKey = cacheKey("analysis", req.challenge, analyzerVersion);
-
-    // Retrieval cache: keyed by challenge + topK + indexGeneration (invalidates on RAG changes)
-    const retrievalKey = cacheKey("retrieval", req, indexGeneration);
-    const cachedRetrieval = await this.cache.get<AnalyzeResponse>(retrievalKey);
-
-    // Retrieval layer covers both analysis + writeups — return if valid
-    if (cachedRetrieval) return cachedRetrieval;
-
-    // Analysis-only cache: same analysis but writeups may have changed
-    const cachedAnalysis = await this.cache.get<AnalyzeResponse>(analysisKey);
-    if (cachedAnalysis) return cachedAnalysis;
+    // One cache, keyed on both fences. indexGeneration invalidates when
+    // new writeups are indexed; analyzerVersion invalidates when the
+    // categorization/keyword logic changes server-side. Without the
+    // latter, a 24h-cached response keeps stale category labels across
+    // an analyzer upgrade.
+    const retrievalKey = cacheKey("retrieval", req, analyzerVersion, indexGeneration);
+    const cached = await this.cache.get<AnalyzeResponse>(retrievalKey);
+    if (cached) return cached;
 
     const res = await this.post<AnalyzeResponse>("/challenges/analyze", req);
-    await this.cache.set(analysisKey, res, ANALYSIS_TTL);
     await this.cache.set(retrievalKey, res, RETRIEVAL_TTL);
     return res;
   }
@@ -62,6 +61,7 @@ export class HubClient {
   async deleteSolve(id: string): Promise<{ deleted: boolean; id: string }> {
     const res = await fetch(`${this.baseUrl}/solves/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      headers: this.authHeaders(),
     });
 
     if (!res.ok) {
@@ -75,7 +75,10 @@ export class HubClient {
   private async post<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...this.authHeaders(),
+      },
       body: JSON.stringify(body),
     });
 

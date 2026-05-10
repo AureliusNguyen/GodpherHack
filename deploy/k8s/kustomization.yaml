@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: godpherhack
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  # Uncomment when the prometheus-operator CRDs are installed in your cluster.
+  # - servicemonitor.yaml
+
+# Note: secret.yaml.template is intentionally NOT included. Apply
+# secrets out-of-band (kubectl create secret, sealed-secrets, etc.).

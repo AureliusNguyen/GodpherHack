@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: godpherhack-local
+
+scrape_configs:
+  - job_name: godpherhack-hub
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - hub:3000
+        labels:
+          service: hub

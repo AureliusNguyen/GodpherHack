@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { SolveSubmitRequestSchema } from "../schemas/writeup.js";
 import type { WriteupRepository } from "../repository/types.js";
+import { agentRunsTotal } from "../services/instrumentation.js";
 
 function generateWriteupId(
   writeup: string,
@@ -50,6 +51,7 @@ export function solveRoutes(repository: WriteupRepository) {
         createdAt: new Date().toISOString(),
       });
 
+      agentRunsTotal.inc();
       return c.json({ stored: true, id });
     },
   );

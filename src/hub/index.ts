@@ -1,23 +1,60 @@
+import type { Server as HttpServer } from "node:http";
 import { serve } from "@hono/node-server";
 import { InMemoryWriteupRepository } from "./repository/in-memory.js";
+import { PineconeWriteupRepository } from "./repository/pinecone.js";
+import type { WriteupRepository } from "./repository/types.js";
 import { ChallengeAnalyzer } from "./services/analyzer.js";
+import { AuthService, authConfigFromEnv } from "./services/auth.js";
+import { CollabHub } from "./services/collab-hub.js";
 import { createHub } from "./server.js";
 
 export interface HubOptions {
   port: number;
 }
 
-export async function startHub(opts: HubOptions) {
-  const repository = new InMemoryWriteupRepository();
-  const analyzer = new ChallengeAnalyzer(null); // no LLM provider yet 
+function createRepository(): WriteupRepository {
+  const pineconeKey = process.env.PINECONE_API_KEY;
+  if (pineconeKey) {
+    const indexName = process.env.PINECONE_INDEX_NAME ?? "ctf-writeups";
+    console.log(`[hub] Using Pinecone repository (index: ${indexName})`);
+    return new PineconeWriteupRepository({ apiKey: pineconeKey, indexName });
+  }
+  console.log("[hub] PINECONE_API_KEY not set -- using in-memory repository (data will not persist)");
+  return new InMemoryWriteupRepository();
+}
 
-  const app = createHub({ repository, analyzer });
+export async function startHub(opts: HubOptions) {
+  const repository = createRepository();
+  const analyzer = new ChallengeAnalyzer(null); // no LLM provider yet
+
+  const authConfig = authConfigFromEnv();
+  const auth = authConfig ? new AuthService(authConfig) : undefined;
+  if (auth) {
+    console.log("[hub] Auth enabled (GitHub OAuth + JWT)");
+  } else if (process.env.ALLOW_ANONYMOUS_HUB === "true") {
+    console.warn(
+      "[hub] WARNING: anonymous mode -- /solves and /challenges/* are unauthenticated. " +
+      "Set JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET to enable auth.",
+    );
+  } else {
+    console.error(
+      "[hub] Auth not configured. Set JWT_SECRET + GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET, " +
+      "or set ALLOW_ANONYMOUS_HUB=true to opt into an open Hub. Refusing to start.",
+    );
+    process.exit(1);
+  }
+
+  const app = createHub({ repository, analyzer, auth });
 
   console.log(`[hub] Starting Hub API on port ${opts.port}...`);
 
-  serve({ fetch: app.fetch, port: opts.port }, (info) => {
+  const server = serve({ fetch: app.fetch, port: opts.port }, (info) => {
     console.log(`[hub] Hub API listening on http://localhost:${info.port}`);
-  });
+  }) as unknown as HttpServer;
+
+  // Attach the collab WebSocket to the same http server (path /ws/collab)
+  new CollabHub(server, auth ?? null);
+  console.log("[hub] Collab WebSocket on ws://localhost:" + opts.port + "/ws/collab");
 }
 
 export { createHub } from "./server.js";

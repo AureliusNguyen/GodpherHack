@@ -4,4 +4,16 @@ dist/
 *.tsbuildinfo
 CLAUDE.md
 .claude/
+.codex
 proposal.tex
+master.txt
+challenges/
+writeups/**/*.txt
+writeups/.upserted.json
+bench/.venv/
+bench/results/
+bench/__pycache__/
+__pycache__/
+.env
+.env.*
+!.env.example

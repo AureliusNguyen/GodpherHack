@@ -66,7 +66,7 @@ export class ChallengeAnalyzer {
       ["rev", /\b(reverse|binary|disassemb|decompil|crackme|deobfuscate|decompile|ghidra|ida|radare2|ltrace)\b/, 0.7],
       ["crypto", /\b(crypt|rsa|aes|cipher|encrypt|decrypt|xor|coppersmith|LLL|BKZ|ZKP|sage)\b/, 0.7],
       ["web", /\b(web|http|sql|xss|cookie|jwt|api|html|curl|XSS|SQL injection|LFI|RFI|RCE|SSRF|XXE|XPATH injection|CSRF|CSP)\b/, 0.7],
-      ["forensics", /\b(forensic|pcap|wireshark|memory|disk|image|volatility|binwalk|autopsy|wireshark|stegsolve|zsteg|exiftool|)\b/, 0.7],
+      ["forensics", /\b(forensic|pcap|wireshark|memory|disk|image|volatility|binwalk|autopsy|stegsolve|zsteg|exiftool)\b/, 0.7],
       ["osint", /\b(osint|geoloc|social|osint|geolocation|google-dorks)\b/, 0.6],
       ["misc", /\b(misc|trivia|pyjail|sandbox|python|cyberchef)\b/, 0.5],
       ["hardware", /\b(hardware|fpga|fpga-programming|fpga-design|fpga-development|fpga-tools|fpga-board|fpga-board-programming|fpga-board-development|fpga-board-tools)\b/, 0.5],

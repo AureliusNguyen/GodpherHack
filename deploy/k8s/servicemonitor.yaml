@@ -1,0 +1,20 @@
+# Optional. Requires the prometheus-operator CRDs to be installed
+# (kube-prometheus-stack provides them). If you scrape via the
+# prometheus.io/scrape pod annotations on the Deployment instead,
+# you can omit this file.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: godpherhack-hub
+  namespace: godpherhack
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: godpherhack-hub
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

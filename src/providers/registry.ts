@@ -22,6 +22,20 @@ export const PROVIDERS: Record<ProviderSlug, ProviderInfo> = {
     envKey: "GOOGLE_API_KEY",
     packageName: "@google/genai",
   },
+  ollama: {
+    slug: "ollama",
+    name: "Ollama",
+    displayName: "Ollama (local)",
+    envKey: "OLLAMA_BASE_URL",
+    packageName: "(http)",
+  },
+  litellm: {
+    slug: "litellm",
+    name: "LiteLLM",
+    displayName: "LiteLLM proxy",
+    envKey: "LITELLM_API_KEY",
+    packageName: "(http)",
+  },
 };
 
 export const PROVIDER_SLUGS = Object.keys(PROVIDERS) as ProviderSlug[];
